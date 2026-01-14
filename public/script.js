@@ -380,10 +380,6 @@ els.btnSubmit.addEventListener('click', () => {
     if (tg.initDataUnsafe && tg.initDataUnsafe.query_id) {
         tg.sendData(JSON.stringify(report));
     } else {
-        // Если мы в браузере — показываем данные, чтобы вы видели, что отправляется
-        console.log("Data to send:", report);
-        alert("Заявка сформирована!\n" + JSON.stringify(report, null, 2));
-        
         // В реальном Telegram этот блок else не сработает, сработает sendData
         // Но если initDataUnsafe пустой (бывает при прямой ссылке), попробуем все равно отправить
         tg.sendData(JSON.stringify(report));
