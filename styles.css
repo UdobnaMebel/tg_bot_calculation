@@ -129,7 +129,17 @@ body {
 }
 
 .cart-main { display: flex; gap: 14px; align-items: center; }
-.cart-thumb { width: 60px; height: 60px; border-radius: 12px; object-fit: cover; background: #f0f0f0; }
+/* ИСПРАВЛЕННАЯ МИНИАТЮРА В КОРЗИНЕ */
+.cart-thumb {
+    width: 60px;
+    height: 60px;
+    flex-shrink: 0; /* Чтобы не сжималась */
+    border-radius: 12px;
+    object-fit: contain; /* Вписывает картинку целиком, не обрезая */
+    background: #ffffff; /* Белый фон */
+    border: 1px solid rgba(0,0,0,0.05); /* Еле заметная рамка для контура */
+    padding: 2px; /* Небольшой отступ внутри, чтобы шкаф не прилипал к краю */
+}
 .cart-info { flex: 1; }
 .cart-name { font-size: 15px; font-weight: 700; margin-bottom: 2px; }
 .cart-meta { font-size: 11px; font-weight: 500; color: var(--text-sec); }
