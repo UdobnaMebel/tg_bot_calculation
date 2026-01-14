@@ -364,7 +364,12 @@ els.btnSubmit.addEventListener('click', () => {
         const getRank = (type) => { if (type === 'bed') return 1; if (type === 'sofa') return 2; return 3; };
         return getRank(a.type) - getRank(b.type);
     });
-    
+
+    // ТЕСТОВАЯ ОТЛАДКА
+    // Если мы не в Телеграме или sendData не сработал - покажем алерт
+    if (!tg.initDataUnsafe?.query_id) {
+         alert("Данные сформированы, но это не Телеграм WebApp или не настроена кнопка.\n\n" + JSON.stringify(report, null, 2));
+    }
     const report = {
         total: els.totalPrice.innerText,
         dims: els.totalDims.innerText,
