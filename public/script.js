@@ -393,3 +393,5 @@ els.btnSubmit.addEventListener('click', () => {
         alert("Ошибка отправки: " + e.message);
     }
 });
+
+init();
