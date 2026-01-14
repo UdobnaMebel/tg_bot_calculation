@@ -353,11 +353,13 @@ function animateValue(obj, start, end, duration) {
     window.requestAnimationFrame(step);
 }
 
+// ... (весь предыдущий код выше без изменений) ...
+
 els.btnSubmit.addEventListener('click', () => {
     if (state.cart.length === 0) return;
     const hasSofa = state.cart.some(i => i.type === 'sofa');
     
-    // Сортируем и для отчета
+    // Сортировка для отчета
     const sortedCart = [...state.cart].sort((a, b) => {
         const getRank = (type) => { if (type === 'bed') return 1; if (type === 'sofa') return 2; return 3; };
         return getRank(a.type) - getRank(b.type);
@@ -373,7 +375,19 @@ els.btnSubmit.addEventListener('click', () => {
             price: (hasSofa && i.priceWithSofa) ? i.priceWithSofa : i.price
         }))
     };
-    tg.sendData(JSON.stringify(report));
+
+    // ПРОВЕРКА: Если мы в Telegram — отправляем данные боту
+    if (tg.initDataUnsafe && tg.initDataUnsafe.query_id) {
+        tg.sendData(JSON.stringify(report));
+    } else {
+        // Если мы в браузере — показываем данные, чтобы вы видели, что отправляется
+        console.log("Data to send:", report);
+        alert("Заявка сформирована!\n" + JSON.stringify(report, null, 2));
+        
+        // В реальном Telegram этот блок else не сработает, сработает sendData
+        // Но если initDataUnsafe пустой (бывает при прямой ссылке), попробуем все равно отправить
+        tg.sendData(JSON.stringify(report));
+    }
 });
 
 init();
