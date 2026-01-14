@@ -356,20 +356,22 @@ function animateValue(obj, start, end, duration) {
 // ... (весь предыдущий код выше без изменений) ...
 
 els.btnSubmit.addEventListener('click', () => {
-    if (state.cart.length === 0) return;
+    // 1. Проверка на пустую корзину
+    if (state.cart.length === 0) {
+        // Можно добавить визуальный эффект, если корзина пуста (например, вибрацию)
+        if (tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('error');
+        return;
+    }
+    
     const hasSofa = state.cart.some(i => i.type === 'sofa');
     
-    // Сортировка для отчета
+    // 2. Сортировка
     const sortedCart = [...state.cart].sort((a, b) => {
         const getRank = (type) => { if (type === 'bed') return 1; if (type === 'sofa') return 2; return 3; };
         return getRank(a.type) - getRank(b.type);
     });
-
-    // ТЕСТОВАЯ ОТЛАДКА
-    // Если мы не в Телеграме или sendData не сработал - покажем алерт
-    if (!tg.initDataUnsafe?.query_id) {
-         alert("Данные сформированы, но это не Телеграм WebApp или не настроена кнопка.\n\n" + JSON.stringify(report, null, 2));
-    }
+    
+    // 3. Формирование объекта
     const report = {
         total: els.totalPrice.innerText,
         dims: els.totalDims.innerText,
@@ -381,14 +383,13 @@ els.btnSubmit.addEventListener('click', () => {
         }))
     };
 
-    // ПРОВЕРКА: Если мы в Telegram — отправляем данные боту
-    if (tg.initDataUnsafe && tg.initDataUnsafe.query_id) {
+    // 4. Отправка данных
+    // Просто отправляем. Telegram сам разберется.
+    try {
         tg.sendData(JSON.stringify(report));
-    } else {
-        // В реальном Telegram этот блок else не сработает, сработает sendData
-        // Но если initDataUnsafe пустой (бывает при прямой ссылке), попробуем все равно отправить
-        tg.sendData(JSON.stringify(report));
+        // На всякий случай закрываем окно, хотя sendData делает это сам
+        setTimeout(() => tg.close(), 100); 
+    } catch (e) {
+        alert("Ошибка отправки: " + e.message);
     }
 });
-
-init();
