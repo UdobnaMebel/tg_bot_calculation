@@ -80,7 +80,7 @@ body {
     40% { transform: scale(0.96); }
     100% { transform: scale(1); }
 }
-.click-anim { animation: pop 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards; }
+.click-anim { animation: pop 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards; }
 
 .card.selected { border-color: var(--primary); }
 .card.selected::after {
@@ -105,7 +105,7 @@ body {
 .card h3 { font-size: 14px; font-weight: 700; margin-bottom: 4px; line-height: 1.3; }
 .card p { font-size: 11px; font-weight: 500; color: var(--text-sec); margin-bottom: 8px; }
 .card-price {
-    font-size: 14px; font-weight: 700;
+    font-size: 14px; font-weight: 400;
     background: var(--primary); color: black;
     padding: 6px 10px; border-radius: 8px;
     margin-top: auto;
@@ -134,7 +134,7 @@ body {
 .cart-name { font-size: 15px; font-weight: 700; margin-bottom: 2px; }
 .cart-meta { font-size: 11px; font-weight: 500; color: var(--text-sec); }
 .cart-actions { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
-.cart-item-price { font-size: 14px; font-weight: 700; }
+.cart-item-price { font-size: 14px; font-weight: 500; }
 .cart-remove { font-size: 11px; color: #ff3b30; font-weight: 600; padding: 6px; cursor: pointer; }
 
 /* COLORS (ИСПРАВЛЕННОЕ ОБРЕЗАНИЕ) */
@@ -166,23 +166,69 @@ body {
     box-shadow: inset 0 0 0 2px #fff, 0 0 0 2px var(--primary); 
 }
 
-/* BOTTOM BAR */
+/* BOTTOM BAR (УВЕЛИЧЕННЫЙ) */
 .bottom-bar {
     position: fixed; bottom: 0; left: 0; width: 100%;
-    background: rgba(255, 255, 255, 0.9); backdrop-filter: blur(12px);
+    background: rgba(255, 255, 255, 0.95); /* Чуть плотнее фон */
+    backdrop-filter: blur(12px);
     border-top: 1px solid rgba(0,0,0,0.05);
-    padding: 16px 20px 30px 20px; z-index: 100;
-    box-shadow: 0 -10px 30px rgba(0,0,0,0.05);
+    /* Увеличили отступы внутри бара */
+    padding: 16px 24px 34px 24px; 
+    z-index: 100;
+    box-shadow: 0 -10px 40px rgba(0,0,0,0.08); /* Тень выразительнее */
 }
-.totals-row { display: flex; justify-content: space-between; align-items: center; }
-.total-price { font-size: 22px; font-weight: 800; letter-spacing: -0.5px; display: block; }
-.total-details { font-size: 10px; color: var(--text-sec); font-weight: 600; }
-.weight-info { font-size: 10px; color: var(--text-sec); margin-top: 4px; font-weight: 500; }
+
+.totals-row { 
+    display: flex; 
+    justify-content: space-between; 
+    align-items: center; 
+}
+
+.total-info-col {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+}
+
+.total-price { 
+    color: rgba(0, 0, 0, 0.800);
+    font-size: 30px; /* Было 22px */
+    font-weight: 800; 
+    letter-spacing: -0.5px; 
+    display: block; 
+    line-height: 1.1;
+    margin-bottom: 4px;
+}
+
+.total-details { 
+    font-size: 16px; /* Было 10px -> Стало читаемо */
+    color: var(--text-sec); 
+    font-weight: 600; 
+}
+
+.weight-info { 
+    font-size: 16px; /* Было 10px */
+    color: #999; 
+    margin-top: 2px; 
+    font-weight: 500; 
+}
+
 .btn-main {
-    background-color: var(--primary); color: black; border: none;
-    padding: 0 24px; height: 50px; border-radius: 14px;
-    font-weight: 700; font-size: 15px; cursor: pointer;
-    box-shadow: 0 4px 12px rgba(244, 208, 63, 0.3); transition: 0.2s;
+    background-color: var(--primary); 
+    color: rgba(0, 0, 0, 0.800); 
+    border: none;
+    /* Кнопка стала больше */
+    padding: 0 32px; 
+    height: 56px; /* Было 50px */
+    border-radius: 16px; /* Скругление под стать размеру */
+    font-weight: 800; 
+    font-size: 17px; /* Было 15px */
+    cursor: pointer;
+    box-shadow: 0 6px 16px rgba(244, 208, 63, 0.35); /* Сочная тень */
+    transition: transform 0.2s, box-shadow 0.2s;
 }
-.btn-main:active { transform: scale(0.97); }
-.spacer { height: 20px; }
+
+.btn-main:active { 
+    transform: scale(0.96); 
+    box-shadow: 0 2px 8px rgba(244, 208, 63, 0.2);
+}
