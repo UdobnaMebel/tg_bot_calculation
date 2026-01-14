@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Конструктор</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+    <div class="app-container">
+        <header class="header">
+            <h1>Конструктор</h1>
+            <p>Соберите свою идеальную спальню</p>
+        </header>
+
+        <!-- Шаг 1 -->
+        <section class="section">
+            <h2 class="section-title">1. Выберите основу</h2>
+            <div class="grid-2-col" id="beds-container"></div>
+        </section>
+
+        <!-- Шаг 2 (По умолчанию заблокирован) -->
+        <section class="section disabled-section" id="step-2">
+            <h2 class="section-title">2. Добавьте модули</h2>
+            
+            <h3 class="subsection-title">Диван (Опционально)</h3>
+            <div class="grid-2-col" id="sofas-container"></div>
+
+            <h3 class="subsection-title">Системы хранения</h3>
+            <div class="grid-2-col" id="storage-container"></div>
+        </section>
+
+        <!-- Шаг 3 -->
+        <section class="section hidden" id="step-3">
+            <h2 class="section-title">3. Конфигурация</h2>
+            <div id="cart-list" class="cart-list"></div>
+        </section>
+        
+        <div class="spacer"></div>
+    </div>
+
+    <div class="bottom-bar hidden" id="bottom-bar">
+        <div class="totals-row">
+            <div class="total-info-col">
+                <span class="total-price" id="total-price">0 ₽</span>
+                <span class="total-details" id="total-dims">0x0x0</span>
+            </div>
+            <button class="btn-main" id="btn-submit">В заявку</button>
+        </div>
+        <div class="weight-info" id="total-weight"></div>
+    </div>
+
+    <script src="data.js"></script>
+    <script src="script.js"></script>
+</body>
+</html>
