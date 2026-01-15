@@ -3,9 +3,9 @@
     --text-main: #111111;
     --text-sec: #888888;
     --bg-app: #eeeeee;           /* Светлый фон (чуть серее, чем раньше, для контраста) */
-    --bg-card: #eeeeee;
+    --bg-card: #ffffff;
     --radius: 20px;
-    --shadow: 0 4px 30px rgba(0, 0, 0, 0.151);
+    --shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
     --swatch-border: #eeeeee;    /* Цвет обводки кружочков (совпадает с фоном карты) */
 }
 
@@ -15,7 +15,7 @@ body.dark-mode {
     --text-sec: #98989E;         /* Благородный серый */
     --bg-app: #111111;           /* Глубокий черный фон страницы */
     --bg-card: #292929;          /* Темно-серые карточки (стиль iOS) */
-    --shadow: 0 10px 10px rgba(255, 0, 0, 0.9); /* Тени более густые */
+    --shadow: 0 10px 10px rgba(0, 0, 0, 0.2); /* Тени более густые */
     --swatch-border: #292929;    /* Обводка кружочков теперь темная */
 }
 
@@ -101,9 +101,13 @@ body {
 .card-img-wrap {
     width: 100%; margin-bottom: 12px;
     display: flex; align-items: center; justify-content: center;
-    background: #eeeeee; /* Фото всегда на белом, так красивее для мебели */
+    background: #ffffff; /* Фото всегда на белом, так красивее для мебели */
     border-radius: 14px;
     overflow: hidden; /* Важно! */
+}
+
+body.dark-mode .card-img-wrap {
+    background: #eeeeee; /* Фото всегда на белом, так красивее для мебели */
 }
 
 .ratio-1-1 { aspect-ratio: 1 / 1; }
@@ -192,7 +196,7 @@ body {
 .bottom-bar {
     position: fixed; bottom: 0; left: 0; width: 100%;
     /* Светлая тема: полупрозрачный белый */
-    background: rgba(255, 255, 255, 0.85); 
+    background: rgba(255, 255, 255, 0.2); 
     backdrop-filter: blur(20px);         /* Сильное размытие (матовое стекло) */
     -webkit-backdrop-filter: blur(20px);
     border-top: 1px solid rgba(0,0,0,0.05);
