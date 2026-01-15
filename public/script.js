@@ -358,6 +358,22 @@ function animateValue(obj, start, end, duration) {
 els.btnSubmit.addEventListener('click', async () => {
     if (state.cart.length === 0) return;
 
+    // --- БЛОК ДИАГНОСТИКИ ---
+    let user = tg.initDataUnsafe?.user;
+    
+    if (!user) {
+        // Если юзера нет, выводим на экран ВСЁ, что передал Телеграм
+        // Это поможет понять, мы в браузере или в Телеграме
+        alert("⚠️ ОШИБКА АВТОРИЗАЦИИ\n\n" +
+              "tg.initData: " + (tg.initData ? "Есть (длина " + tg.initData.length + ")" : "ПУСТО") + "\n" +
+              "tg.platform: " + tg.platform + "\n" +
+              "user: undefined");
+              
+        // Ставим фейковые данные, чтобы заявка хоть как-то ушла
+        user = { first_name: "Не определен", id: 0 };
+    }
+    // ------------------------
+
     // 1. Визуальная обратная связь (Спиннер или изменение текста)
     const originalText = els.btnSubmit.innerText;
     els.btnSubmit.innerText = "Отправка...";
