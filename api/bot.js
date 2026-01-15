@@ -31,7 +31,10 @@ function createManagerMessage(orderData, user) {
     msg += `👤 <b>Клиент:</b> ${username} (ID: <code>${userId}</code>)\n`;
     msg += `💰 <b>Итого:</b> ${orderData.total}\n`;
     msg += `📏 <b>Габариты:</b> ${orderData.dims}\n`;
-    msg += `⚖️ <b>Вес:</b> ${orderData.weight}\n\n`;
+    
+    // ИСПРАВЛЕНИЕ: Убираем дубль слова "Вес", но делаем его жирным
+    msg += `⚖️ ${orderData.weight.replace('Вес:', '<b>Вес:</b>')}\n\n`;
+    
     msg += `📋 <b>Состав:</b>\n`;
 
     orderData.items.forEach((item, i) => {
@@ -41,7 +44,7 @@ function createManagerMessage(orderData, user) {
     return msg;
 }
 
-// Формирование сообщения для КЛИЕНТА (Подробное)
+// Формирование сообщения для КЛИЕНТА
 function createClientMessage(orderData) {
     let msg = `✅ <b>Ваша заявка принята!</b>\n\n`;
     msg += `Менеджер свяжется с вами в ближайшее время.\n\n`;
@@ -54,7 +57,9 @@ function createClientMessage(orderData) {
 
     msg += `\n💰 <b>Итого:</b> ${orderData.total}\n`;
     msg += `📏 <b>Габариты:</b> ${orderData.dims}\n`;
-    msg += `⚖️ <b>Вес:</b> ${orderData.weight}`;
+    
+    // ИСПРАВЛЕНИЕ: То же самое для клиента
+    msg += `⚖️ ${orderData.weight.replace('Вес:', '<b>Вес:</b>')}`;
     
     return msg;
 }
@@ -93,10 +98,8 @@ bot.on('message:web_app_data', async (ctx) => {
         const order = JSON.parse(data);
         const user = ctx.from; 
 
-        // Отправляем менеджеру
         await sendOrderToManager(order, user);
         
-        // Отвечаем клиенту (используем тот же подробный шаблон)
         const clientMsg = createClientMessage(order);
         
         await ctx.reply(clientMsg, { 
