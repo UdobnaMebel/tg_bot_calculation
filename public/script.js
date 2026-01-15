@@ -356,22 +356,15 @@ function animateValue(obj, start, end, duration) {
 // ... (весь предыдущий код выше без изменений) ...
 
 els.btnSubmit.addEventListener('click', () => {
-    // 1. Проверка на пустую корзину
-    if (state.cart.length === 0) {
-        // Можно добавить визуальный эффект, если корзина пуста (например, вибрацию)
-        if (tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('error');
-        return;
-    }
+    // 1. Собираем данные (как и раньше)
+    if (state.cart.length === 0) return;
     
     const hasSofa = state.cart.some(i => i.type === 'sofa');
-    
-    // 2. Сортировка
     const sortedCart = [...state.cart].sort((a, b) => {
         const getRank = (type) => { if (type === 'bed') return 1; if (type === 'sofa') return 2; return 3; };
         return getRank(a.type) - getRank(b.type);
     });
     
-    // 3. Формирование объекта
     const report = {
         total: els.totalPrice.innerText,
         dims: els.totalDims.innerText,
@@ -383,14 +376,22 @@ els.btnSubmit.addEventListener('click', () => {
         }))
     };
 
-    // 4. Отправка данных
-    // Просто отправляем. Telegram сам разберется.
+    // 2. ДИАГНОСТИКА СРЕДЫ (Вот это нам нужно)
+    const debugInfo = {
+        platform: tg.platform,             // iOS, Android, etc?
+        version: tg.version,               // Версия бота
+        hasInitData: !!tg.initData,        // Есть ли данные авторизации?
+        dataLength: tg.initData.length     // Длина строки данных
+    };
+
+    // Показываем окно с правдой
+    alert("🤖 DIAGNOSTIC:\n" + JSON.stringify(debugInfo, null, 2));
+
+    // 3. Пробуем отправить
     try {
         tg.sendData(JSON.stringify(report));
-        // На всякий случай закрываем окно, хотя sendData делает это сам
-        setTimeout(() => tg.close(), 100); 
     } catch (e) {
-        alert("Ошибка отправки: " + e.message);
+        alert("Ошибка вызова sendData: " + e.message);
     }
 });
 
