@@ -358,78 +358,58 @@ function animateValue(obj, start, end, duration) {
 els.btnSubmit.addEventListener('click', async () => {
     if (state.cart.length === 0) return;
 
-    // --- БЛОК ДИАГНОСТИКИ ---
-    let user = tg.initDataUnsafe?.user;
-    
-    if (!user) {
-        // Если юзера нет, выводим на экран ВСЁ, что передал Телеграм
-        // Это поможет понять, мы в браузере или в Телеграме
-        alert("⚠️ ОШИБКА АВТОРИЗАЦИИ\n\n" +
-              "tg.initData: " + (tg.initData ? "Есть (длина " + tg.initData.length + ")" : "ПУСТО") + "\n" +
-              "tg.platform: " + tg.platform + "\n" +
-              "user: undefined");
-              
-        // Ставим фейковые данные, чтобы заявка хоть как-то ушла
-        user = { first_name: "Не определен", id: 0 };
-    }
-    // ------------------------
+    // Сборка данных
+    const hasSofa = state.cart.some(i => i.type === 'sofa');
+    const sortedCart = [...state.cart].sort((a, b) => {
+        const getRank = (type) => { if (type === 'bed') return 1; if (type === 'sofa') return 2; return 3; };
+        return getRank(a.type) - getRank(b.type);
+    });
 
-    // 1. Визуальная обратная связь (Спиннер или изменение текста)
-    const originalText = els.btnSubmit.innerText;
-    els.btnSubmit.innerText = "Отправка...";
-    els.btnSubmit.style.opacity = "0.7";
+    const report = {
+        total: els.totalPrice.innerText,
+        dims: els.totalDims.innerText,
+        weight: els.totalWeight.innerText,
+        items: sortedCart.map(i => ({
+            name: i.name,
+            color: (i.category === 'ldsp' ? COLORS.LDSP : COLORS.FABRIC).find(c => c.id === i.selectedColorId)?.name,
+            price: (hasSofa && i.priceWithSofa) ? i.priceWithSofa : i.price
+        }))
+    };
 
+    // 1. ПОПЫТКА ОТПРАВИТЬ ЧЕРЕЗ TELEGRAM (Основной метод)
+    // Это передаст данные боту, и бот увидит твой реальный ID, даже если WebApp его не видит
     try {
-        // 2. Сборка данных
-        const hasSofa = state.cart.some(i => i.type === 'sofa');
-        const sortedCart = [...state.cart].sort((a, b) => {
-            const getRank = (type) => { if (type === 'bed') return 1; if (type === 'sofa') return 2; return 3; };
-            return getRank(a.type) - getRank(b.type);
-        });
+        tg.sendData(JSON.stringify(report));
+    } catch (e) {
+        console.log("sendData не сработал (возможно, открыто не через кнопку)");
+    }
 
-        const report = {
-            total: els.totalPrice.innerText,
-            dims: els.totalDims.innerText,
-            weight: els.totalWeight.innerText,
-            items: sortedCart.map(i => ({
-                name: i.name,
-                color: (i.category === 'ldsp' ? COLORS.LDSP : COLORS.FABRIC).find(c => c.id === i.selectedColorId)?.name,
-                price: (hasSofa && i.priceWithSofa) ? i.priceWithSofa : i.price
-            }))
-        };
-
-        // 3. Данные пользователя (берем прямо из WebApp)
-        const user = tg.initDataUnsafe?.user || { first_name: "Неизвестный", username: "" };
-
-        // 4. ПРЯМАЯ ОТПРАВКА (FETCH)
-        // Отправляем на свой же сервер в папку api/bot
-        const response = await fetch('/api/bot', {
+    // 2. ПОПЫТКА ОТПРАВИТЬ НАПРЯМУЮ (Резервный метод для Меню)
+    // Если sendData сработал, окно закроется почти сразу.
+    // Если нет (или это Меню) — сработает этот fetch.
+    const user = tg.initDataUnsafe?.user || { id: 0, first_name: "Клиент", username: "" };
+    
+    // Если у нас НЕТ ID (то есть sendData нужен), но sendData может не сработать в браузере...
+    // Мы всё равно шлем fetch, чтобы менеджер получил заказ хотя бы анонимно.
+    
+    try {
+        await fetch('/api/bot', {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                type: 'DIRECT_ORDER', // Флаг для сервера
+                type: 'DIRECT_ORDER',
                 order: report,
                 user: user
             })
         });
-
-        if (response.ok) {
-            // Успех!
-            if (tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
-            alert("✅ Заявка отправлена!");
-            tg.close(); // Закрываем окно
-        } else {
-            throw new Error("Сервер вернул ошибку: " + response.status);
-        }
-
     } catch (e) {
-        alert("❌ Ошибка отправки: " + e.message);
-        // Возвращаем кнопку в исходное состояние
-        els.btnSubmit.innerText = originalText;
-        els.btnSubmit.style.opacity = "1";
+        // Ошибки fetch игнорируем, если sendData сработал
     }
+
+    // Закрываем окно
+    setTimeout(() => {
+        tg.close();
+    }, 100);
 });
 
 init();
