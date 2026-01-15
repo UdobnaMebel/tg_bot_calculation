@@ -6,7 +6,7 @@ const MANAGER_CHAT_ID = process.env.MANAGER_CHAT_ID;
 // === НАСТРОЙКА КЛАВИАТУРЫ ===
 // Добавляем параметр ?v=chat, чтобы сбросить кэш Телеграма.
 // Это гарантирует, что при открытии передадутся данные пользователя (ID, Имя).
-const webAppUrl = (process.env.WEBAPP_URL || '') + '?v=chat';
+const webAppUrl = 'https://calculation-smoky.vercel.app/?menu=fix';
 
 const KEYBOARD = {
     keyboard: [[{ text: "🛏 Открыть конструктор", web_app: { url: webAppUrl } }]],
