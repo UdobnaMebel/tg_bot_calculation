@@ -1,21 +1,25 @@
 :root {
-    --primary: #F4D03F;
+    --primary: #F4D03F;          /* Наш фирменный желтый */
     --text-main: #111111;
     --text-sec: #888888;
-    --bg-app: #FAFAFA;
-    --bg-card: #FFFFFF;
+    --bg-app: #eeeeee;           /* Светлый фон (чуть серее, чем раньше, для контраста) */
+    --bg-card: #eeeeee;
     --radius: 20px;
-    --shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.08);
+    --shadow: 0 4px 30px rgba(0, 0, 0, 0.151);
+    --swatch-border: #eeeeee;    /* Цвет обводки кружочков (совпадает с фоном карты) */
 }
 
+/* --- PREMIUM DARK MODE --- */
 body.dark-mode {
-    --text-main: #FFFFFF;
-    --text-sec: #AAAAAA;
-    --bg-app: #000000;
-    --bg-card: #1C1C1E;
+    --text-main: #eeeeee;        /* Мягкий белый */
+    --text-sec: #98989E;         /* Благородный серый */
+    --bg-app: #111111;           /* Глубокий черный фон страницы */
+    --bg-card: #292929;          /* Темно-серые карточки (стиль iOS) */
+    --shadow: 0 10px 10px rgba(255, 0, 0, 0.9); /* Тени более густые */
+    --swatch-border: #292929;    /* Обводка кружочков теперь темная */
 }
 
-/* ПРИНУДИТЕЛЬНЫЙ ШРИФТ ДЛЯ ВСЕХ ЭЛЕМЕНТОВ */
+/* Принудительный шрифт */
 body, button, input, select, textarea {
     font-family: 'Montserrat', -apple-system, BlinkMacSystemFont, sans-serif !important;
 }
@@ -25,8 +29,9 @@ body, button, input, select, textarea {
 body {
     background-color: var(--bg-app);
     color: var(--text-main);
-    padding-bottom: 140px; /* Отступ под фиксированный бар */
+    padding-bottom: 140px;
     -webkit-font-smoothing: antialiased;
+    transition: background-color 0.3s, color 0.3s; /* Плавный переход смены темы */
 }
 
 .app-container { padding: 20px; max-width: 600px; margin: 0 auto; }
@@ -96,8 +101,11 @@ body {
 .card-img-wrap {
     width: 100%; margin-bottom: 12px;
     display: flex; align-items: center; justify-content: center;
-    background: #fff; border-radius: 12px;
+    background: #eeeeee; /* Фото всегда на белом, так красивее для мебели */
+    border-radius: 14px;
+    overflow: hidden; /* Важно! */
 }
+
 .ratio-1-1 { aspect-ratio: 1 / 1; }
 .ratio-3-4 { aspect-ratio: 3 / 4; }
 .card img { width: 100%; height: 100%; object-fit: contain; border-radius: 12px; }
@@ -165,7 +173,10 @@ body {
     border-radius: 50%;
     background-size: cover; background-position: center;
     border: 1px solid rgba(0,0,0,0.1); 
-    box-shadow: inset 0 0 0 2px #fff;
+    
+    /* Внутреннее кольцо теперь берет цвет из переменной */
+    box-shadow: inset 0 0 0 2px var(--swatch-border);
+    
     cursor: pointer;
     transition: transform 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275), border-color 0.2s;
 }
@@ -173,20 +184,32 @@ body {
 .swatch.active {
     border-color: transparent;
     transform: scale(1.15);
-    /* Тень теперь точно влезет благодаря padding в родителе */
-    box-shadow: inset 0 0 0 2px #fff, 0 0 0 2px var(--primary); 
+    /* Активное кольцо + Желтая обводка */
+    box-shadow: inset 0 0 0 2px var(--swatch-border), 0 0 0 2px var(--primary); 
 }
 
-/* BOTTOM BAR (УВЕЛИЧЕННЫЙ) */
+/* BOTTOM BAR */
 .bottom-bar {
     position: fixed; bottom: 0; left: 0; width: 100%;
-    background: rgba(255, 255, 255, 0.95); /* Чуть плотнее фон */
-    backdrop-filter: blur(12px);
+    /* Светлая тема: полупрозрачный белый */
+    background: rgba(255, 255, 255, 0.85); 
+    backdrop-filter: blur(20px);         /* Сильное размытие (матовое стекло) */
+    -webkit-backdrop-filter: blur(20px);
     border-top: 1px solid rgba(0,0,0,0.05);
-    /* Увеличили отступы внутри бара */
     padding: 16px 24px 34px 24px; 
     z-index: 100;
-    box-shadow: 0 -10px 40px rgba(0,0,0,0.08); /* Тень выразительнее */
+    box-shadow: 0 -10px 40px rgba(0,0,0,0.08);
+    transition: background 0.3s;
+}
+
+/* Темная тема: полупрозрачный темно-серый */
+body.dark-mode .bottom-bar {
+    background: rgba(28, 28, 30, 0.85); 
+    border-top: 1px solid rgba(255,255,255,0.1); /* Тонкая светлая линия сверху */
+}
+
+body.dark-mode .total-price {
+     color: #eeeeee;         /* Сделает сумму белой */
 }
 
 .totals-row { 

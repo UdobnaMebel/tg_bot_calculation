@@ -2,7 +2,9 @@ const tg = window.Telegram.WebApp;
 tg.expand();
 tg.enableClosingConfirmation(); 
 
-// if (tg.colorScheme === 'dark') document.body.classList.add('dark-mode');
+if (tg.colorScheme === 'dark') {
+    document.body.classList.add('dark-mode');
+}
 
 const state = {
     selectedBed: null,
