@@ -3,30 +3,37 @@ const { Bot, webhookCallback } = require('grammy');
 const bot = new Bot(process.env.BOT_TOKEN);
 const MANAGER_CHAT_ID = process.env.MANAGER_CHAT_ID;
 
-// Ссылка (твоя рабочая)
+// ИСПОЛЬЗУЕМ ТОЧНО ТУ ЖЕ ССЫЛКУ, ЧТО И В КНОПКЕ МЕНЮ (она проверена)
 const webAppUrl = 'https://calculation-smoky.vercel.app/?menu=fix'; 
 
-// === ИЗМЕНЕНИЕ: ИСПОЛЬЗУЕМ INLINE КЛАВИАТУРУ ===
-// Она находится под сообщением, а не внизу экрана
+// ВАЖНО: Я изменил текст кнопки на "🛏 Рассчитать стоимость".
+// Это заставит Телеграм удалить старую глючную кнопку и создать новую с правильной ссылкой.
 const KEYBOARD = {
-    inline_keyboard: [
-        [{ text: "🛏 Открыть конструктор", web_app: { url: webAppUrl } }]
-    ]
+    keyboard: [
+        [{ 
+            text: "🛏 Рассчитать стоимость", 
+            web_app: { url: webAppUrl } 
+        }]
+    ],
+    resize_keyboard: true // Делаем кнопку поменьше и аккуратнее
 };
 
-// 1. Команда /start
 bot.command('start', async (ctx) => {
-    await ctx.reply('👋 Конструктор готов!\nНажмите кнопку под этим сообщением:', { 
+    await ctx.reply('👋 Конструктор готов! Нажмите кнопку внизу экрана.', { 
         reply_markup: KEYBOARD 
     });
 });
 
-// Функции отправки (без изменений, только клавиатуру передаем ту же)
+// --- ФУНКЦИИ ОТПРАВКИ (Без изменений) ---
+
 async function sendOrderToManager(orderData, userData) {
     let message = `🆕 <b>НОВЫЙ ЗАКАЗ</b>\n\n`;
     const username = userData.username ? `@${userData.username}` : 'Без ника';
     
-    message += `👤 <b>Клиент:</b> ${username} (ID: <code>${userData.id}</code>)\n`;
+    // Если ID нет, пишем "Не определен"
+    const userId = userData.id || 'Не определен';
+    
+    message += `👤 <b>Клиент:</b> ${username} (ID: <code>${userId}</code>)\n`;
     message += `💰 <b>Итого:</b> ${orderData.total}\n`;
     message += `📏 <b>Габариты:</b> ${orderData.dims}\n`;
     message += `⚖️ <b>Вес:</b> ${orderData.weight}\n\n`;
@@ -54,8 +61,7 @@ async function sendConfirmationToClient(orderData, userData) {
     try {
         await bot.api.sendMessage(userData.id, clientMsg, { 
             parse_mode: 'HTML',
-            // Возвращаем кнопку, чтобы клиент мог заказать снова
-            reply_markup: KEYBOARD 
+            reply_markup: KEYBOARD // Возвращаем кнопку клиенту
         });
     } catch (e) { console.error(e); }
 }
