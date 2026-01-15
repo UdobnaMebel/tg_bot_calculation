@@ -3,10 +3,11 @@ const { Bot, webhookCallback } = require('grammy');
 const bot = new Bot(process.env.BOT_TOKEN);
 const MANAGER_CHAT_ID = process.env.MANAGER_CHAT_ID;
 
-// Ссылка на приложение (та же, что в BotFather)
-const webAppUrl = 'https://calculation-smoky.vercel.app/'; 
+// 1. ГИБКАЯ ССЫЛКА (Берется из настроек Vercel)
+// Важно: В настройках Vercel переменная WEBAPP_URL должна быть
+// точь-в-точь как та, что вы указали в BotFather (включая слэш в конце, если он там есть)
+const webAppUrl = process.env.WEBAPP_URL; 
 
-// Клавиатура (показываем только при /start)
 const KEYBOARD = {
     keyboard: [
         [{ 
@@ -17,10 +18,10 @@ const KEYBOARD = {
     resize_keyboard: true
 };
 
-// 1. Команда /start (Показывает кнопку)
+// 1. Команда /start
 bot.command('start', async (ctx) => {
-    // Сначала удаляем старую (на всякий случай), потом шлем новую
-    await ctx.reply('Меню обновлено.', { reply_markup: { remove_keyboard: true } });
+    // Сначала чистим старое, потом шлем новое
+    // await ctx.reply('Меню обновлено.', { reply_markup: { remove_keyboard: true } });
     await ctx.reply('👋 Конструктор готов! Нажмите кнопку ниже:', { reply_markup: KEYBOARD });
 });
 
@@ -52,7 +53,7 @@ async function sendOrderToManager(orderData, userData) {
     }
 }
 
-// Отправка клиенту (С УДАЛЕНИЕМ КЛАВИАТУРЫ)
+// Отправка клиенту (С УДАЛЕНИЕМ КНОПКИ)
 async function sendConfirmationToClient(orderData, userData) {
     if (!userData || !userData.id) return;
 
@@ -63,7 +64,7 @@ async function sendConfirmationToClient(orderData, userData) {
     try {
         await bot.api.sendMessage(userData.id, clientMsg, { 
             parse_mode: 'HTML',
-            // ВОТ ИЗМЕНЕНИЕ: Говорим Телеграму убрать кнопку
+            // Убираем нижнюю кнопку после заказа
             reply_markup: { remove_keyboard: true } 
         });
     } catch (e) {
@@ -73,17 +74,17 @@ async function sendConfirmationToClient(orderData, userData) {
 
 // --- ОБРАБОТЧИКИ ---
 
-// 1. Старый способ (tg.sendData) - для ПК и старых клиентов
+// 1. Старый способ (tg.sendData) - для ПК (где нет ID) и надежности
 bot.on('message:web_app_data', async (ctx) => {
     try {
         const { data } = ctx.message.web_app_data;
         const order = JSON.parse(data);
         const user = ctx.from; 
 
-        // Логика та же: отправляем менеджеру и клиенту
+        // Отправляем менеджеру
         await sendOrderToManager(order, user);
         
-        // Отвечаем клиенту и убираем кнопку
+        // Отвечаем клиенту и УБИРАЕМ КНОПКУ
         await ctx.reply(`✅ <b>Заявка принята!</b>\n\nМенеджер скоро свяжется с вами.`, { 
             parse_mode: 'HTML',
             reply_markup: { remove_keyboard: true } 
