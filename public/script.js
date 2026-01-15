@@ -356,41 +356,49 @@ function animateValue(obj, start, end, duration) {
 // ... (весь предыдущий код выше без изменений) ...
 
 els.btnSubmit.addEventListener('click', () => {
-    // 1. Проверка на пустую корзину
-    if (state.cart.length === 0) {
-        // Можно добавить визуальный эффект, если корзина пуста (например, вибрацию)
-        if (tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('error');
-        return;
-    }
-    
-    const hasSofa = state.cart.some(i => i.type === 'sofa');
-    
-    // 2. Сортировка
-    const sortedCart = [...state.cart].sort((a, b) => {
-        const getRank = (type) => { if (type === 'bed') return 1; if (type === 'sofa') return 2; return 3; };
-        return getRank(a.type) - getRank(b.type);
-    });
-    
-    // 3. Формирование объекта
-    const report = {
-        total: els.totalPrice.innerText,
-        dims: els.totalDims.innerText,
-        weight: els.totalWeight.innerText,
-        items: sortedCart.map(i => ({
-            name: i.name,
-            color: (i.category === 'ldsp' ? COLORS.LDSP : COLORS.FABRIC).find(c => c.id === i.selectedColorId)?.name,
-            price: (hasSofa && i.priceWithSofa) ? i.priceWithSofa : i.price
-        }))
-    };
-
-    // 4. Отправка данных
-    // Просто отправляем. Telegram сам разберется.
     try {
-        tg.sendData(JSON.stringify(report));
-        // На всякий случай закрываем окно, хотя sendData делает это сам
-        setTimeout(() => tg.close(), 100); 
+        // ЭТАП 1: Нажатие
+        alert("1. Кнопка нажата. Проверка корзины...");
+
+        if (state.cart.length === 0) {
+            alert("Корзина пуста!");
+            return;
+        }
+        
+        // ЭТАП 2: Сборка данных
+        const hasSofa = state.cart.some(i => i.type === 'sofa');
+        
+        const sortedCart = [...state.cart].sort((a, b) => {
+            const getRank = (type) => { if (type === 'bed') return 1; if (type === 'sofa') return 2; return 3; };
+            return getRank(a.type) - getRank(b.type);
+        });
+        
+        const report = {
+            total: els.totalPrice.innerText,
+            dims: els.totalDims.innerText,
+            weight: els.totalWeight.innerText,
+            items: sortedCart.map(i => ({
+                name: i.name,
+                color: (i.category === 'ldsp' ? COLORS.LDSP : COLORS.FABRIC).find(c => c.id === i.selectedColorId)?.name,
+                price: (hasSofa && i.priceWithSofa) ? i.priceWithSofa : i.price
+            }))
+        };
+
+        // ЭТАП 3: Данные готовы
+        const jsonString = JSON.stringify(report);
+        alert("2. Данные собраны! Длина: " + jsonString.length + "\nПопытка отправки...");
+
+        // ЭТАП 4: Отправка
+        // ВАЖНО: Убери любые проверки if (tg.initData...)
+        tg.sendData(jsonString);
+        
+        // ЭТАП 5: Если мы тут, команда ушла
+        // Не закрываем окно сразу, чтобы успеть прочитать алерт, если что-то пойдет не так
+        // setTimeout(() => tg.close(), 500); 
+
     } catch (e) {
-        alert("Ошибка отправки: " + e.message);
+        // Если ошибка была в JS (например, опечатка в переменной), мы увидим это тут
+        alert("🛑 КРИТИЧЕСКАЯ ОШИБКА JS:\n" + e.message + "\n" + e.stack);
     }
 });
 
