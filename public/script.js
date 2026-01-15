@@ -376,40 +376,54 @@ els.btnSubmit.addEventListener('click', async () => {
         }))
     };
 
-    // 1. ПОПЫТКА ОТПРАВИТЬ ЧЕРЕЗ TELEGRAM (Основной метод)
-    // Это передаст данные боту, и бот увидит твой реальный ID, даже если WebApp его не видит
-    try {
+    // Проверяем, видим ли мы пользователя
+    const user = tg.initDataUnsafe?.user;
+
+    // === УМНАЯ ЛОГИКА ОТПРАВКИ ===
+    
+    if (user && user.id) {
+        // ВАРИАНТ 1: Мы знаем ID пользователя (Телефон, Меню, Inline)
+        // Используем fetch, потому что он работает везде.
+        // sendData НЕ вызываем, чтобы избежать дубликатов.
+        
+        // Визуально показываем процесс
+        const originalText = els.btnSubmit.innerText;
+        els.btnSubmit.innerText = "Отправка...";
+        
+        try {
+            const response = await fetch('/api/bot', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    type: 'DIRECT_ORDER',
+                    order: report,
+                    user: user
+                })
+            });
+            
+            if (response.ok) {
+                if (tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
+                tg.close();
+            } else {
+                throw new Error("Ошибка сети");
+            }
+        } catch (e) {
+            alert("Ошибка отправки: " + e.message);
+            els.btnSubmit.innerText = originalText;
+        }
+
+    } else {
+        // ВАРИАНТ 2: Мы НЕ знаем ID (Глюк на ПК с нижней кнопкой)
+        // fetch отправил бы "Анонима", поэтому мы его НЕ используем.
+        // Используем нативный sendData. Телеграм сам подставит ID на сервере.
+        
         tg.sendData(JSON.stringify(report));
-    } catch (e) {
-        console.log("sendData не сработал (возможно, открыто не через кнопку)");
+        
+        // sendData работает "вслепую", поэтому просто закрываем окно
+        setTimeout(() => {
+            tg.close();
+        }, 100);
     }
-
-    // 2. ПОПЫТКА ОТПРАВИТЬ НАПРЯМУЮ (Резервный метод для Меню)
-    // Если sendData сработал, окно закроется почти сразу.
-    // Если нет (или это Меню) — сработает этот fetch.
-    const user = tg.initDataUnsafe?.user || { id: 0, first_name: "Клиент", username: "" };
-    
-    // Если у нас НЕТ ID (то есть sendData нужен), но sendData может не сработать в браузере...
-    // Мы всё равно шлем fetch, чтобы менеджер получил заказ хотя бы анонимно.
-    
-    try {
-        await fetch('/api/bot', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                type: 'DIRECT_ORDER',
-                order: report,
-                user: user
-            })
-        });
-    } catch (e) {
-        // Ошибки fetch игнорируем, если sendData сработал
-    }
-
-    // Закрываем окно
-    setTimeout(() => {
-        tg.close();
-    }, 100);
 });
 
 init();
