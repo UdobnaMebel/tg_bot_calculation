@@ -3,9 +3,6 @@ const { Bot, webhookCallback } = require('grammy');
 const bot = new Bot(process.env.BOT_TOKEN);
 const MANAGER_CHAT_ID = process.env.MANAGER_CHAT_ID;
 
-// 1. ГИБКАЯ ССЫЛКА (Берется из настроек Vercel)
-// Важно: В настройках Vercel переменная WEBAPP_URL должна быть
-// точь-в-точь как та, что вы указали в BotFather (включая слэш в конце, если он там есть)
 const webAppUrl = process.env.WEBAPP_URL; 
 
 const KEYBOARD = {
@@ -20,14 +17,13 @@ const KEYBOARD = {
 
 // 1. Команда /start
 bot.command('start', async (ctx) => {
-    // Сначала чистим старое, потом шлем новое
-    // await ctx.reply('Меню обновлено.', { reply_markup: { remove_keyboard: true } });
     await ctx.reply('👋 Конструктор готов! Нажмите кнопку ниже.\n\n По другим вопросам пишите прямо в этот чат 💬', { reply_markup: KEYBOARD });
 });
 
 // --- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ---
 
-function createMessage(orderData, user) {
+// Формирование сообщения для МЕНЕДЖЕРА
+function createManagerMessage(orderData, user) {
     let msg = `🆕 <b>НОВЫЙ ЗАКАЗ</b>\n\n`;
     const username = user.username ? `@${user.username}` : 'Без ника';
     const userId = user.id || 'Не определен';
@@ -45,9 +41,27 @@ function createMessage(orderData, user) {
     return msg;
 }
 
+// Формирование сообщения для КЛИЕНТА (Подробное)
+function createClientMessage(orderData) {
+    let msg = `✅ <b>Ваша заявка принята!</b>\n\n`;
+    msg += `Менеджер свяжется с вами в ближайшее время.\n\n`;
+    
+    msg += `📋 <b>Ваш заказ:</b>\n`;
+    orderData.items.forEach((item, i) => {
+        msg += `${i + 1}. ${item.name} (${item.color})\n`;
+        msg += `   └ ${item.price ? item.price.toLocaleString() + ' ₽' : 'Вкл'}\n`;
+    });
+
+    msg += `\n💰 <b>Итого:</b> ${orderData.total}\n`;
+    msg += `📏 <b>Габариты:</b> ${orderData.dims}\n`;
+    msg += `⚖️ <b>Вес:</b> ${orderData.weight}`;
+    
+    return msg;
+}
+
 // Отправка менеджеру
 async function sendOrderToManager(orderData, userData) {
-    const message = createMessage(orderData, userData);
+    const message = createManagerMessage(orderData, userData);
     if (MANAGER_CHAT_ID) {
         await bot.api.sendMessage(MANAGER_CHAT_ID, message, { parse_mode: 'HTML' }).catch(e => console.error(e));
     }
@@ -57,14 +71,12 @@ async function sendOrderToManager(orderData, userData) {
 async function sendConfirmationToClient(orderData, userData) {
     if (!userData || !userData.id) return;
 
-    let clientMsg = `✅ <b>Ваша заявка принята!</b>\n\n`;
-    clientMsg += `Менеджер свяжется с вами в ближайшее время.\n`;
-    clientMsg += `\n<b>Итого: ${orderData.total}</b>`;
+    // Генерируем подробный текст
+    const message = createClientMessage(orderData);
 
     try {
-        await bot.api.sendMessage(userData.id, clientMsg, { 
+        await bot.api.sendMessage(userData.id, message, { 
             parse_mode: 'HTML',
-            // Убираем нижнюю кнопку после заказа
             reply_markup: { remove_keyboard: true } 
         });
     } catch (e) {
@@ -84,8 +96,10 @@ bot.on('message:web_app_data', async (ctx) => {
         // Отправляем менеджеру
         await sendOrderToManager(order, user);
         
-        // Отвечаем клиенту и УБИРАЕМ КНОПКУ
-        await ctx.reply(`✅ <b>Заявка принята!</b>\n\nМенеджер скоро свяжется с вами.`, { 
+        // Отвечаем клиенту (используем тот же подробный шаблон)
+        const clientMsg = createClientMessage(order);
+        
+        await ctx.reply(clientMsg, { 
             parse_mode: 'HTML',
             reply_markup: { remove_keyboard: true } 
         });
