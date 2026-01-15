@@ -9,74 +9,66 @@ const KEYBOARD = {
     resize_keyboard: true
 };
 
-// 1. Команда /start
 bot.command('start', async (ctx) => {
-    await ctx.reply('👋 Конструктор готов! Нажмите кнопку ниже.', { reply_markup: KEYBOARD });
+    await ctx.reply('👋 Конструктор готов! Жмите кнопку.', { reply_markup: KEYBOARD });
 });
 
-// 2. УНИВЕРСАЛЬНЫЙ ОБРАБОТЧИК (Ловим вообще всё)
-bot.on('message', async (ctx) => {
-    // Логируем, что пришло (для отладки в Vercel)
-    console.log("📨 Пришло сообщение:", JSON.stringify(ctx.message, null, 2));
+// Этот обработчик оставим для совместимости (если вдруг sendData заработает)
+bot.on('message:web_app_data', async (ctx) => {
+    // Логика обработки старого метода (можно оставить пустой или как было)
+    await ctx.reply('Данные получены через Telegram API');
+});
 
-    // Проверяем вручную: есть ли данные от WebApp?
-    if (ctx.message.web_app_data) {
-        console.log("🟢 ОБНАРУЖЕНЫ ДАННЫЕ WEBAPP!");
-        
-        try {
-            const { data } = ctx.message.web_app_data;
-            const order = JSON.parse(data);
+// --- ФУНКЦИЯ ОТПРАВКИ ЗАКАЗА МЕНЕДЖЕРУ ---
+async function sendOrderToManager(orderData, userData) {
+    let message = `🆕 <b>НОВЫЙ ЗАКАЗ (Прямой)</b>\n\n`;
+    // Берем данные юзера, которые прислал фронтенд
+    const username = userData.username ? `@${userData.username}` : 'Без ника';
+    const name = userData.first_name || 'Клиент';
+    
+    message += `👤 <b>Клиент:</b> ${username} (${name})\n`;
+    message += `💰 <b>Итого:</b> ${orderData.total}\n`;
+    message += `📏 <b>Габариты:</b> ${orderData.dims}\n`;
+    message += `⚖️ <b>Вес:</b> ${orderData.weight}\n\n`;
+    message += `📋 <b>Состав:</b>\n`;
 
-            let message = `🆕 <b>НОВЫЙ ЗАКАЗ</b>\n\n`;
-            message += `👤 <b>Клиент:</b> @${ctx.from.username || 'Нет'} (${ctx.from.first_name})\n`;
-            message += `💰 <b>Итого:</b> ${order.total}\n`;
-            message += `📏 <b>Габариты:</b> ${order.dims}\n`;
-            message += `⚖️ <b>Вес:</b> ${order.weight}\n\n`;
-            message += `📋 <b>Состав:</b>\n`;
-            
-            order.items.forEach((item, i) => {
-                message += `${i + 1}. ${item.name} (${item.color})\n`;
-                message += `   └ ${item.price ? item.price.toLocaleString() + ' ₽' : 'Включено'}\n`;
-            });
+    orderData.items.forEach((item, i) => {
+        message += `${i + 1}. ${item.name} (${item.color})\n`;
+        message += `   └ ${item.price ? item.price.toLocaleString() + ' ₽' : 'Вкл'}\n`;
+    });
 
-            // Отправка менеджеру
-            if (MANAGER_CHAT_ID) {
-                await ctx.api.sendMessage(MANAGER_CHAT_ID, message, { parse_mode: 'HTML' });
-            } else {
-                console.error("⚠️ Не задан MANAGER_CHAT_ID!");
-            }
-
-            // Ответ клиенту
-            await ctx.reply('✅ Заявка принята! Менеджер скоро свяжется с вами.', {
-                reply_markup: KEYBOARD
-            });
-
-        } catch (e) {
-            console.error("🔴 ОШИБКА ОБРАБОТКИ:", e);
-            await ctx.reply(`Ошибка чтения данных: ${e.message}`);
-        }
-    } 
-    // Если это просто текст или что-то другое - игнорируем (или можно отвечать для теста)
-    else {
-        console.log("⚪️ Это не WebApp данные, пропускаем.");
+    if (MANAGER_CHAT_ID) {
+        await bot.api.sendMessage(MANAGER_CHAT_ID, message, { parse_mode: 'HTML' });
+    } else {
+        console.error("MANAGER_CHAT_ID не задан");
     }
-});
+}
 
-// 3. Запуск Vercel
+// Запуск Vercel
 const handleUpdate = webhookCallback(bot, 'http');
 
 module.exports = async (req, res) => {
-    // Проверка для браузера (чтобы не было Timeout)
-    if (req.method === 'GET') {
-        return res.status(200).send('Bot is running!');
+    // 1. Обработка ПРЯМОГО запроса от фронтенда (fetch)
+    if (req.body && req.body.type === 'DIRECT_ORDER') {
+        try {
+            console.log("🚀 ПОЛУЧЕН ПРЯМОЙ ЗАКАЗ:", req.body);
+            const { order, user } = req.body;
+            
+            // Отправляем сообщение менеджеру
+            await sendOrderToManager(order, user);
+            
+            return res.status(200).json({ success: true });
+        } catch (e) {
+            console.error("ОШИБКА ПРЯМОГО ЗАКАЗА:", e);
+            return res.status(500).json({ error: e.message });
+        }
     }
 
-    // Логируем сам запрос от Телеграма (на всякий случай)
+    // 2. Обработка обычных запросов от Telegram (Webhook)
     try {
-        console.log("🌐 VERCEL REQUEST BODY:", JSON.stringify(req.body).substring(0, 200) + "...");
         return await handleUpdate(req, res);
     } catch (e) {
-        console.error("💥 CRITICAL ERROR:", e);
-        return res.status(500).send(e.message);
+        console.error("Telegram Webhook Error:", e);
+        return res.status(500).send('Error');
     }
 };
