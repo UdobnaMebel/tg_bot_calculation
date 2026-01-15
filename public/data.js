@@ -93,7 +93,7 @@ const MODULES = [
         priceWithSofa: 15500, // Если шкафы тоже дорожают из-за глубины/высоты с диваном
         width: 45,
         height: 220,
-        depth: 45,
+        depth: 44,
         weight: 60,
         category: 'ldsp',
         image: 'images/modules/wardrobe_1.png'
