@@ -3,21 +3,29 @@ const { Bot, webhookCallback } = require('grammy');
 const bot = new Bot(process.env.BOT_TOKEN);
 const MANAGER_CHAT_ID = process.env.MANAGER_CHAT_ID;
 
+// Ссылка на приложение (та же, что в BotFather)
 const webAppUrl = 'https://calculation-smoky.vercel.app/'; 
 
-// Используем обычную кнопку, она лучше работает с sendData
+// Клавиатура (показываем только при /start)
 const KEYBOARD = {
-    keyboard: [[{ text: "🛏 Рассчитать стоимость", web_app: { url: webAppUrl } }]],
+    keyboard: [
+        [{ 
+            text: "✅ Открыть конструктор", 
+            web_app: { url: webAppUrl } 
+        }]
+    ],
     resize_keyboard: true
 };
 
+// 1. Команда /start (Показывает кнопку)
 bot.command('start', async (ctx) => {
-    await ctx.reply('👋 Конструктор готов! Нажмите кнопку внизу.', { reply_markup: KEYBOARD });
+    // Сначала удаляем старую (на всякий случай), потом шлем новую
+    await ctx.reply('Меню обновлено.', { reply_markup: { remove_keyboard: true } });
+    await ctx.reply('👋 Конструктор готов! Нажмите кнопку ниже:', { reply_markup: KEYBOARD });
 });
 
 // --- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ---
 
-// Формируем текст сообщения
 function createMessage(orderData, user) {
     let msg = `🆕 <b>НОВЫЙ ЗАКАЗ</b>\n\n`;
     const username = user.username ? `@${user.username}` : 'Без ника';
@@ -36,59 +44,66 @@ function createMessage(orderData, user) {
     return msg;
 }
 
-// Отправка менеджеру и клиенту
-async function processOrder(ctx, orderData, userData) {
+// Отправка менеджеру
+async function sendOrderToManager(orderData, userData) {
     const message = createMessage(orderData, userData);
-
-    // 1. Менеджеру
     if (MANAGER_CHAT_ID) {
         await bot.api.sendMessage(MANAGER_CHAT_ID, message, { parse_mode: 'HTML' }).catch(e => console.error(e));
     }
+}
 
-    // 2. Клиенту
-    // Если контекст (ctx) есть (это sendData), отвечаем прямо ему
-    // Если контекста нет (это fetch), шлем по ID
-    if (ctx) {
-        await ctx.reply(`✅ <b>Заявка принята!</b>\n\nМенеджер скоро свяжется с вами.`, { 
+// Отправка клиенту (С УДАЛЕНИЕМ КЛАВИАТУРЫ)
+async function sendConfirmationToClient(orderData, userData) {
+    if (!userData || !userData.id) return;
+
+    let clientMsg = `✅ <b>Ваша заявка принята!</b>\n\n`;
+    clientMsg += `Менеджер свяжется с вами в ближайшее время.\n`;
+    clientMsg += `\n<b>Итого: ${orderData.total}</b>`;
+
+    try {
+        await bot.api.sendMessage(userData.id, clientMsg, { 
             parse_mode: 'HTML',
-            reply_markup: KEYBOARD 
+            // ВОТ ИЗМЕНЕНИЕ: Говорим Телеграму убрать кнопку
+            reply_markup: { remove_keyboard: true } 
         });
-    } else if (userData.id) {
-        await bot.api.sendMessage(userData.id, `✅ <b>Заявка принята!</b>\n\nМенеджер скоро свяжется с вами.`, { 
-            parse_mode: 'HTML',
-            reply_markup: KEYBOARD 
-        }).catch(e => console.error(e));
+    } catch (e) {
+        console.error("Ошибка отправки клиенту:", e);
     }
 }
 
 // --- ОБРАБОТЧИКИ ---
 
-// 1. Старый добрый способ (tg.sendData)
-// Сюда придет заказ с кнопки внизу, и тут ID БУДЕТ ГАРАНТИРОВАННО
+// 1. Старый способ (tg.sendData) - для ПК и старых клиентов
 bot.on('message:web_app_data', async (ctx) => {
     try {
         const { data } = ctx.message.web_app_data;
         const order = JSON.parse(data);
-        const user = ctx.from; // Берем юзера из сообщения Телеграм (это надежно!)
+        const user = ctx.from; 
 
-        await processOrder(ctx, order, user);
+        // Логика та же: отправляем менеджеру и клиенту
+        await sendOrderToManager(order, user);
+        
+        // Отвечаем клиенту и убираем кнопку
+        await ctx.reply(`✅ <b>Заявка принята!</b>\n\nМенеджер скоро свяжется с вами.`, { 
+            parse_mode: 'HTML',
+            reply_markup: { remove_keyboard: true } 
+        });
+        
     } catch (e) {
         console.error("Ошибка web_app_data:", e);
     }
 });
 
-// 2. Прямой способ (fetch) - для Меню и подстраховки
+// 2. Прямой способ (fetch) - для Меню и Телефонов
 const handleUpdate = webhookCallback(bot, 'http');
 
 module.exports = async (req, res) => {
     if (req.method === 'GET') return res.status(200).send('Bot Running');
 
     if (req.body && req.body.type === 'DIRECT_ORDER') {
-        // Если прилетел прямой заказ, обрабатываем, но только если он не дублирует sendData
-        // (Для простоты пока просто обрабатываем, дубли маловероятны, т.к. окно закрывается)
         const { order, user } = req.body;
-        // Если ID нет (0), то processOrder просто не отправит клиенту, но отправит менеджеру
-        await processOrder(null, order, user); 
+        await sendOrderToManager(order, user);
+        await sendConfirmationToClient(order, user);
         return res.status(200).json({ success: true });
     }
 
