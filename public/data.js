@@ -38,7 +38,7 @@ const MODULES = [
         width: 140,
         height: 220,
         depth: 44,
-        weight: 210,
+        weight: 180,
         category: 'ldsp',
         image: 'images/beds/bed160.png'
     },
@@ -51,7 +51,7 @@ const MODULES = [
         width: 160,
         height: 220,
         depth: 44,
-        weight: 210,
+        weight: 180,
         category: 'ldsp',
         image: 'images/beds/bed160.png'
     },
@@ -64,7 +64,7 @@ const MODULES = [
         width: 180,
         height: 220,
         depth: 44,
-        weight: 210,
+        weight: 180,
         category: 'ldsp',
         image: 'images/beds/bed160.png'
     },
@@ -94,7 +94,7 @@ const MODULES = [
         width: 45,
         height: 220,
         depth: 45,
-        weight: 40,
+        weight: 60,
         category: 'ldsp',
         image: 'images/modules/wardrobe_1.png'
     },
@@ -107,7 +107,7 @@ const MODULES = [
         width: 80,
         height: 220,
         depth: 44,
-        weight: 75,
+        weight: 120,
         category: 'ldsp',
         image: 'images/modules/wardrobe_2.png'
     },
@@ -120,7 +120,7 @@ const MODULES = [
         width: 20,
         height: 220,
         depth: 44,
-        weight: 30,
+        weight: 60,
         category: 'ldsp',
         image: 'images/modules/shelves.png'
     }

@@ -147,13 +147,14 @@ body {
 .cart-item-price { font-size: 14px; font-weight: 500; }
 .cart-remove { font-size: 11px; color: #ff3b30; font-weight: 600; padding: 6px; cursor: pointer; }
 
-/* COLORS (ИСПРАВЛЕННОЕ ОБРЕЗАНИЕ) */
+/* ИСПРАВЛЕННЫЕ ОТСТУПЫ ДЛЯ ЦВЕТОВ */
 .cart-colors-row {
     display: flex; 
     gap: 10px; 
     overflow-x: auto; 
-    /* Увеличили padding сверху и снизу до 10px, чтобы при увеличении (scale) кружок не резался */
-    padding: 10px 4px; 
+    /* Увеличили отступы со всех сторон до 10px. 
+       Теперь первый кружок не будет обрезаться слева. */
+    padding: 10px; 
     -ms-overflow-style: none; 
     scrollbar-width: none;
 }
