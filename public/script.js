@@ -355,43 +355,64 @@ function animateValue(obj, start, end, duration) {
 
 // ... (весь предыдущий код выше без изменений) ...
 
-els.btnSubmit.addEventListener('click', () => {
-    // 1. Собираем данные (как и раньше)
+els.btnSubmit.addEventListener('click', async () => {
     if (state.cart.length === 0) return;
-    
-    const hasSofa = state.cart.some(i => i.type === 'sofa');
-    const sortedCart = [...state.cart].sort((a, b) => {
-        const getRank = (type) => { if (type === 'bed') return 1; if (type === 'sofa') return 2; return 3; };
-        return getRank(a.type) - getRank(b.type);
-    });
-    
-    const report = {
-        total: els.totalPrice.innerText,
-        dims: els.totalDims.innerText,
-        weight: els.totalWeight.innerText,
-        items: sortedCart.map(i => ({
-            name: i.name,
-            color: (i.category === 'ldsp' ? COLORS.LDSP : COLORS.FABRIC).find(c => c.id === i.selectedColorId)?.name,
-            price: (hasSofa && i.priceWithSofa) ? i.priceWithSofa : i.price
-        }))
-    };
 
-    // 2. ДИАГНОСТИКА СРЕДЫ (Вот это нам нужно)
-    const debugInfo = {
-        platform: tg.platform,             // iOS, Android, etc?
-        version: tg.version,               // Версия бота
-        hasInitData: !!tg.initData,        // Есть ли данные авторизации?
-        dataLength: tg.initData.length     // Длина строки данных
-    };
+    // 1. Визуальная обратная связь (Спиннер или изменение текста)
+    const originalText = els.btnSubmit.innerText;
+    els.btnSubmit.innerText = "Отправка...";
+    els.btnSubmit.style.opacity = "0.7";
 
-    // Показываем окно с правдой
-    alert("🤖 DIAGNOSTIC:\n" + JSON.stringify(debugInfo, null, 2));
-
-    // 3. Пробуем отправить
     try {
-        tg.sendData(JSON.stringify(report));
+        // 2. Сборка данных
+        const hasSofa = state.cart.some(i => i.type === 'sofa');
+        const sortedCart = [...state.cart].sort((a, b) => {
+            const getRank = (type) => { if (type === 'bed') return 1; if (type === 'sofa') return 2; return 3; };
+            return getRank(a.type) - getRank(b.type);
+        });
+
+        const report = {
+            total: els.totalPrice.innerText,
+            dims: els.totalDims.innerText,
+            weight: els.totalWeight.innerText,
+            items: sortedCart.map(i => ({
+                name: i.name,
+                color: (i.category === 'ldsp' ? COLORS.LDSP : COLORS.FABRIC).find(c => c.id === i.selectedColorId)?.name,
+                price: (hasSofa && i.priceWithSofa) ? i.priceWithSofa : i.price
+            }))
+        };
+
+        // 3. Данные пользователя (берем прямо из WebApp)
+        const user = tg.initDataUnsafe?.user || { first_name: "Неизвестный", username: "" };
+
+        // 4. ПРЯМАЯ ОТПРАВКА (FETCH)
+        // Отправляем на свой же сервер в папку api/bot
+        const response = await fetch('/api/bot', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                type: 'DIRECT_ORDER', // Флаг для сервера
+                order: report,
+                user: user
+            })
+        });
+
+        if (response.ok) {
+            // Успех!
+            if (tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
+            alert("✅ Заявка отправлена!");
+            tg.close(); // Закрываем окно
+        } else {
+            throw new Error("Сервер вернул ошибку: " + response.status);
+        }
+
     } catch (e) {
-        alert("Ошибка вызова sendData: " + e.message);
+        alert("❌ Ошибка отправки: " + e.message);
+        // Возвращаем кнопку в исходное состояние
+        els.btnSubmit.innerText = originalText;
+        els.btnSubmit.style.opacity = "1";
     }
 });
 
