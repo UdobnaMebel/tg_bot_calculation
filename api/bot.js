@@ -1,53 +1,59 @@
 const { Bot, webhookCallback } = require('grammy');
 
 const bot = new Bot(process.env.BOT_TOKEN);
-const MANAGER_CHAT_ID = process.env.MANAGER_CHAT_ID; 
+const MANAGER_CHAT_ID = process.env.MANAGER_CHAT_ID;
 
+// 1. ЛОГГЕР ВСЕХ СОБЫТИЙ (Spy Middleware)
+// Этот код выведет в консоль Vercel всё, что присылает Телеграм
+bot.use(async (ctx, next) => {
+    console.log("📥 ПОЛУЧЕНО СОБЫТИЕ:", JSON.stringify(ctx.update, null, 2));
+    await next();
+});
+
+// Клавиатура
 const KEYBOARD = {
     keyboard: [[{ text: "🛏 Открыть конструктор", web_app: { url: process.env.WEBAPP_URL } }]],
     resize_keyboard: true
 };
 
 bot.command('start', async (ctx) => {
-    await ctx.reply('👋 Добро пожаловать!', { reply_markup: KEYBOARD });
+    await ctx.reply('Бот работает! Нажми кнопку.', { reply_markup: KEYBOARD });
 });
 
-// ИЗМЕНЕНИЕ: Слушаем абсолютно ВСЕ сообщения
-bot.on('message', async (ctx) => {
-    // 1. Проверяем, есть ли данные WebApp
-    if (ctx.message.web_app_data) {
-        try {
-            const { data } = ctx.message.web_app_data;
-            const order = JSON.parse(data);
+// Обработчик данных
+bot.on('message:web_app_data', async (ctx) => {
+    console.log("🚀 ПРИШЛИ ДАННЫЕ WEBAPP!"); // Лог в консоль
+    try {
+        const { data } = ctx.message.web_app_data;
+        const order = JSON.parse(data);
 
-            let message = `🆕 <b>НОВЫЙ ЗАКАЗ</b>\n\n`;
-            message += `👤 <b>Клиент:</b> @${ctx.from.username || 'Нет'} (${ctx.from.first_name})\n`;
-            message += `💰 <b>Сумма:</b> ${order.total}\n\n`;
-            
-            // Краткий список для теста
-            order.items.forEach((item, i) => {
-                message += `${i+1}. ${item.name} (${item.color})\n`;
-            });
-
-            // Отправляем менеджеру
-            if (MANAGER_CHAT_ID) {
-                await ctx.api.sendMessage(MANAGER_CHAT_ID, message, { parse_mode: 'HTML' });
-            }
-
-            // Отправляем клиенту
-            await ctx.reply('✅ Заявка получена! Скоро свяжемся.', { 
-                reply_markup: KEYBOARD 
-            });
-
-        } catch (e) {
-            console.error("ОШИБКА ОБРАБОТКИ:", e); // Увидим в логах Vercel
-            await ctx.reply(`Ошибка бота: ${e.message}`);
+        let message = `🆕 ЗАКАЗ ПРИНЯТ!\nСумма: ${order.total}`;
+        
+        // Отправка менеджеру
+        if (MANAGER_CHAT_ID) {
+            console.log("📤 Отправляю менеджеру:", MANAGER_CHAT_ID);
+            await ctx.api.sendMessage(MANAGER_CHAT_ID, message);
+        } else {
+            console.error("⛔️ НЕТ MANAGER_CHAT_ID в переменных!");
         }
-    } else {
-        // Если это просто текст или что-то другое
-        // Не отвечаем, чтобы не спамить, или можно вывести в консоль
-        console.log("Получено сообщение без web_app_data:", ctx.message);
+
+        await ctx.reply('✅ Данные получены сервером!', { reply_markup: KEYBOARD });
+
+    } catch (e) {
+        console.error("🔥 ОШИБКА ВНУТРИ БОТА:", e);
+        await ctx.reply('Ошибка обработки данных.');
     }
 });
 
-module.exports = webhookCallback(bot, 'http');
+// Обертка для Vercel с принудительным логом
+const handleUpdate = webhookCallback(bot, 'http');
+
+module.exports = async (req, res) => {
+    try {
+        console.log("🌐 VERCEL FUNCTION STARTED"); // Этот лог должен быть всегда
+        return await handleUpdate(req, res);
+    } catch (e) {
+        console.error("💥 CRITICAL VERCEL ERROR:", e);
+        res.status(500).json({ error: e.message });
+    }
+};
