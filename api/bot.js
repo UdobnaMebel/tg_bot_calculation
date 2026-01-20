@@ -10,7 +10,7 @@ const KEYBOARD = {
     resize_keyboard: true
 };
 
-// --- ФУНКЦИИ ТОПИКОВ ---
+// --- 1. ФУНКЦИИ БАЗЫ ---
 
 async function createNewTopic(user) {
     try {
@@ -25,7 +25,7 @@ async function createNewTopic(user) {
         
         return topic.message_thread_id;
     } catch (e) {
-        console.error("Topic Error:", e.message);
+        console.error("Create Topic Error:", e);
         return null;
     }
 }
@@ -36,32 +36,33 @@ async function getTopicId(user) {
     return await createNewTopic(user);
 }
 
-// --- ОТПРАВКА С ЗАЩИТОЙ (ТЕКСТ) ---
-// Используется для /start и Заявок
+// --- 2. ОТПРАВКА С ВОССТАНОВЛЕНИЕМ ---
+
+// Отправка текста (Заказы, Старт)
 async function sendToAdmin(text, user) {
     if (!ADMIN_GROUP_ID) return;
     
+    // Попытка 1: Получаем ID (из кэша или создаем)
     let threadId = await getTopicId(user);
 
     try {
-        // Попытка 1
-        await bot.api.sendMessage(ADMIN_GROUP_ID, text, { parse_mode: 'HTML', message_thread_id: threadId || undefined });
+        await bot.api.sendMessage(ADMIN_GROUP_ID, text, { parse_mode: 'HTML', message_thread_id: threadId });
     } catch (e) {
-        // Если ошибка - удаляем кэш и пробуем снова в новый топик
+        // Ошибка (например, топик удален) -> Удаляем кэш -> Создаем новый -> Шлем снова
+        console.log(`Ошибка отправки в ${threadId}, пересоздаем...`);
         await kv.del(`user:${user.id}`);
         threadId = await createNewTopic(user);
         
         try {
-            await bot.api.sendMessage(ADMIN_GROUP_ID, text, { parse_mode: 'HTML', message_thread_id: threadId || undefined });
+            await bot.api.sendMessage(ADMIN_GROUP_ID, text, { parse_mode: 'HTML', message_thread_id: threadId });
         } catch (e2) {
-            // Если совсем не вышло - в General
+            // Фолбэк в General
             await bot.api.sendMessage(ADMIN_GROUP_ID, text, { parse_mode: 'HTML' });
         }
     }
 }
 
-// --- ПЕРЕСЫЛКА С ЗАЩИТОЙ (СООБЩЕНИЯ) ---
-// Используется для сообщений клиента
+// Пересылка сообщений (Чат)
 async function forwardToAdmin(ctx) {
     if (!ADMIN_GROUP_ID) return;
     const user = ctx.from;
@@ -69,22 +70,23 @@ async function forwardToAdmin(ctx) {
     let threadId = await getTopicId(user);
 
     try {
-        // Попытка 1
-        await ctx.copyMessage(ADMIN_GROUP_ID, { message_thread_id: threadId || undefined });
+        await ctx.copyMessage(ADMIN_GROUP_ID, { message_thread_id: threadId });
     } catch (e) {
-        // Ошибка - пробуем снова
+        // Ошибка -> Удаляем кэш -> Создаем новый -> Шлем снова
+        console.log(`Ошибка пересылки в ${threadId}, пересоздаем...`);
         await kv.del(`user:${user.id}`);
         threadId = await createNewTopic(user);
         
         try {
-            await ctx.copyMessage(ADMIN_GROUP_ID, { message_thread_id: threadId || undefined });
+            await ctx.copyMessage(ADMIN_GROUP_ID, { message_thread_id: threadId });
         } catch (e2) {
-            await ctx.copyMessage(ADMIN_GROUP_ID); // В General
+            // Фолбэк в General
+            await ctx.copyMessage(ADMIN_GROUP_ID);
         }
     }
 }
 
-// --- ТЕКСТЫ ---
+// --- 3. ГЕНЕРАЦИЯ СООБЩЕНИЙ ---
 
 function createManagerMessage(order, user) {
     let msg = `🆕 <b>НОВЫЙ ЗАКАЗ</b>\n\n👤 <b>Клиент:</b> @${user.username||'нет'} (ID: ${user.id})\n\n📋 <b>Состав:</b>\n`;
@@ -104,15 +106,15 @@ function createClientMessage(order) {
 // ОБРАБОТЧИКИ
 // ==========================================
 
-// 1. СТАРТ
+// 1. КОМАНДЫ
 bot.command('start', async (ctx) => {
     if (ctx.chat.type === 'private') {
-        await ctx.reply('👋 Конструктор готов!', { reply_markup: KEYBOARD });
+        await ctx.reply('👋 Конструктор готов! Нажмите кнопку ниже.', { reply_markup: KEYBOARD });
         await sendToAdmin(`👋 Пользователь нажал <b>/start</b>`, ctx.from);
     }
 });
 
-// 2. ЗАКАЗ (Кнопка)
+// 2. ЗАКАЗЫ (WebApp)
 bot.on('message:web_app_data', async (ctx) => {
     try {
         const order = JSON.parse(ctx.message.web_app_data.data);
@@ -121,32 +123,47 @@ bot.on('message:web_app_data', async (ctx) => {
     } catch (e) { console.error(e); }
 });
 
-// 3. ПЕРЕПИСКА (ЧАТ)
+// 3. ПЕРЕПИСКА
 bot.on('message', async (ctx, next) => {
-    // Игнорируем только системные авто-репосты каналов
+    // Игнорируем авто-пересылки каналов
     if (ctx.message.is_automatic_forward) return;
 
     const chatId = String(ctx.chat.id);
     
-    // А) КЛИЕНТ ПИШЕТ БОТУ
+    // А) КЛИЕНТ ПИШЕТ (В ЛИЧКУ)
     if (ctx.chat.type === 'private') {
         await forwardToAdmin(ctx);
     } 
     
-    // Б) АДМИН ОТВЕЧАЕТ В ТОПИКЕ
+    // Б) АДМИН ПИШЕТ (В ГРУППЕ)
     else if (chatId === ADMIN_GROUP_ID) {
+        
+        // ВАЖНО: Игнорируем служебные сообщения "Топик создан/изменен"
+        // message_thread_id есть у всех сообщений в топике, но is_topic_message = true у служебных о создании
+        if (ctx.message.forum_topic_created || ctx.message.forum_topic_edited || ctx.message.forum_topic_closed || ctx.message.forum_topic_reopened) {
+            return;
+        }
+
         const threadId = ctx.message.message_thread_id;
         
-        // Если это топик (не General)
         if (threadId) {
             const userId = await kv.get(`thread:${threadId}`);
             
             if (userId) {
                 try {
-                    await ctx.copyMessage(userId);
-                    await ctx.react('👍'); // Подтверждение успеха
+                    // ЕСЛИ ТЕКСТ -> Шлем sendMessage (надежнее, чем copy)
+                    if (ctx.message.text) {
+                        await bot.api.sendMessage(userId, ctx.message.text);
+                    } 
+                    // ЕСЛИ КАРТИНКА/ФАЙЛ -> Копируем
+                    else {
+                        await ctx.copyMessage(userId);
+                    }
+                    
+                    // Реакция успеха
+                    await ctx.react('👍'); 
                 } catch (e) {
-                    await ctx.reply(`❌ Не доставлено: ${e.description}`);
+                    await ctx.reply(`❌ Ошибка: ${e.description}`);
                 }
             }
         }
