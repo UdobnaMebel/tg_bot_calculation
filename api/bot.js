@@ -10,6 +10,16 @@ const KEYBOARD = {
     resize_keyboard: true
 };
 
+// --- КОМАНДА СБРОСА (Для лечения багов) ---
+bot.command('reset', async (ctx) => {
+    try {
+        await kv.del(`user:${ctx.from.id}`);
+        await ctx.reply("✅ Ваша сессия сброшена. Следующее сообщение создаст новый топик.");
+    } catch (e) {
+        await ctx.reply(`Ошибка сброса: ${e.message}`);
+    }
+});
+
 // --- ФУНКЦИИ ТОПИКОВ ---
 
 async function createNewTopic(user) {
@@ -18,6 +28,7 @@ async function createNewTopic(user) {
         const nameClean = `${user.first_name} ${user.last_name||''}`.trim().substring(0, 30);
         const topicName = `${nameClean} #${randomId}`;
 
+        console.log(`[DEBUG] Создаем топик: ${topicName}`);
         const topic = await bot.api.createForumTopic(ADMIN_GROUP_ID, topicName);
         
         await kv.set(`user:${user.id}`, topic.message_thread_id);
@@ -32,9 +43,13 @@ async function createNewTopic(user) {
 
 async function getTopicForUser(user) {
     const cachedId = await kv.get(`user:${user.id}`);
+    
+    // ВАЖНО: Проверяем, что ID - это валидное число
     if (cachedId && !isNaN(parseInt(cachedId)) && parseInt(cachedId) > 0) {
         return parseInt(cachedId);
     }
+    
+    console.log("[DEBUG] Валидный топик не найден, создаем новый...");
     return await createNewTopic(user);
 }
 
@@ -54,7 +69,7 @@ function createClientMessage(order) {
     return msg;
 }
 
-// --- ОТПРАВКА С ЛЕЧЕНИЕМ ---
+// --- ОТПРАВКА С ЗАЩИТОЙ ---
 
 async function sendToGroupWithRetry(text, user) {
     if (!ADMIN_GROUP_ID) return;
@@ -65,14 +80,17 @@ async function sendToGroupWithRetry(text, user) {
     }
 
     try {
+        console.log(`[DEBUG] Отправка в threadId: ${threadId}`);
         await bot.api.sendMessage(ADMIN_GROUP_ID, text, { parse_mode: 'HTML', message_thread_id: threadId });
     } catch (e) {
-        // Ошибка - пробуем пересоздать
-        console.log(`Ошибка отправки в ${threadId}, пересоздаем...`);
+        console.error(`[ERROR] Fail send to ${threadId}:`, e.message);
+        
+        // Чистка и ретрай
         await kv.del(`user:${user.id}`);
-        // Не удаляем thread:ID, вдруг это был сбой сети, а не удаление
+        // Не удаляем thread:ID, так как он мог быть кривым
         
         const newResult = await createNewTopic(user);
+        
         if (typeof newResult === 'object' && newResult.error) {
              await bot.api.sendMessage(ADMIN_GROUP_ID, `❌ <b>Сбой:</b> ${newResult.error}\n\n${text}`, { parse_mode: 'HTML' });
         } else {
@@ -92,45 +110,22 @@ async function copyToGroupWithRetry(ctx) {
     }
 
     try {
+        console.log(`[DEBUG] Пересылка в threadId: ${threadId}`);
         await ctx.copyMessage(ADMIN_GROUP_ID, { message_thread_id: threadId });
     } catch (e) {
+        console.error(`[ERROR] Fail copy to ${threadId}:`, e.message);
+        
         await kv.del(`user:${user.id}`);
         const newResult = await createNewTopic(user);
         
         if (typeof newResult === 'object' && newResult.error) {
-            await ctx.copyMessage(ADMIN_GROUP_ID); // General
+            await bot.api.sendMessage(ADMIN_GROUP_ID, `❌ <b>Сбой:</b> ${newResult.error}`, { parse_mode: 'HTML' });
+            await ctx.copyMessage(ADMIN_GROUP_ID);
         } else {
             await ctx.copyMessage(ADMIN_GROUP_ID, { message_thread_id: newResult });
         }
     }
 }
-
-// === АВТОМАТИЧЕСКАЯ ОЧИСТКА (НОВОЕ!) ===
-// Слушаем события "Топик закрыт" или "Топик удален"
-// :forum_topic_closed - если просто закрыли
-// :forum_topic_deleted - если удалили совсем (в версиях API может отличаться, ловим все служебные)
-
-bot.on([':forum_topic_closed', ':forum_topic_reopened', ':forum_topic_created', ':forum_topic_edited'], async (ctx) => {
-    // Просто логируем для инфо
-    console.log("Служебное событие топика:", ctx.update);
-});
-
-// ГЛАВНОЕ: Если топик удален, чистим базу
-// (Событие forum_topic_deleted приходит как service message)
-bot.on('message:forum_topic_deleted', async (ctx) => {
-    const threadId = ctx.message.message_thread_id;
-    console.log(`🗑 Топик ${threadId} был удален админом.`);
-    
-    // Ищем, чей это был топик
-    const userId = await kv.get(`thread:${threadId}`);
-    
-    if (userId) {
-        await kv.del(`user:${userId}`);
-        await kv.del(`thread:${threadId}`);
-        console.log(`✅ Данные пользователя ${userId} очищены.`);
-    }
-});
-
 
 // === ОБРАБОТЧИКИ ===
 
@@ -139,11 +134,11 @@ bot.on('message', async (ctx, next) => {
 
     const chatId = ctx.chat.id.toString();
     
-    // 1. Клиент -> Бот
+    // Клиент -> Бот
     if (ctx.chat.type === 'private') {
         await copyToGroupWithRetry(ctx);
     } 
-    // 2. Админ -> Клиент
+    // Админ -> Клиент
     else if (chatId === ADMIN_GROUP_ID && ctx.message.message_thread_id) {
         const userId = await kv.get(`thread:${ctx.message.message_thread_id}`);
         if (userId) {
@@ -186,7 +181,6 @@ module.exports = async (req, res) => {
         }
         return res.status(200).json({ success: true });
     }
-    
     try { return await handleUpdate(req, res); } catch (e) { return res.status(500).send('Error'); }
 };
 
