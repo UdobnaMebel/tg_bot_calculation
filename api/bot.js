@@ -14,20 +14,20 @@ const KEYBOARD = {
     resize_keyboard: true
 };
 
-// --- ФУНКЦИИ ---
+// --- ФУНКЦИИ БАЗЫ ДАННЫХ ---
 
 async function getOrCreateTopic(user) {
     const userId = user.id;
-    // 1. Проверяем, есть ли уже топик
+    // 1. Ищем существующий топик
     const existingThreadId = await redis.get(`user:${userId}`);
     if (existingThreadId) return parseInt(existingThreadId);
 
-    // 2. Если нет — создаем
+    // 2. Создаем новый, если нет
     try {
         const topicName = `${user.first_name} ${user.last_name || ''} (@${user.username || 'anon'})`.trim().substring(0, 60);
         const topic = await bot.api.createForumTopic(ADMIN_GROUP_ID, topicName);
         
-        // Сохраняем связи: Юзер <-> Топик
+        // Сохраняем зеркальную связь
         await redis.set(`user:${userId}`, topic.message_thread_id);
         await redis.set(`thread:${topic.message_thread_id}`, userId);
 
@@ -38,23 +38,50 @@ async function getOrCreateTopic(user) {
     }
 }
 
-// ... (Функции формирования сообщений оставляем те же, я их сократил для удобства чтения) ...
+// --- ФОРМАТИРОВАНИЕ СООБЩЕНИЙ (Исправлено) ---
+
 function createManagerMessage(orderData, user) {
-    let msg = `🆕 <b>НОВЫЙ ЗАКАЗ</b>\n\n💰 <b>Итого:</b> ${orderData.total}\n`;
-    orderData.items.forEach(i => msg += `${i.name} (${i.color}) - ${i.price}\n`);
-    return msg;
-}
-function createClientMessage(orderData) {
-    let msg = `✅ <b>Заявка принята!</b>\n\n`;
-    orderData.items.forEach(i => msg += `${i.name} (${i.color})\n`);
-    msg += `\n💰 <b>Итого:</b> ${orderData.total}`;
+    let msg = `🆕 <b>НОВЫЙ ЗАКАЗ</b>\n\n`;
+    const username = user.username ? `@${user.username}` : 'Без ника';
+    
+    msg += `👤 <b>Клиент:</b> ${username} (ID: ${user.id})\n\n`;
+    msg += `📋 <b>Состав заказа:</b>\n`;
+
+    orderData.items.forEach((item, i) => {
+        msg += `${i + 1}. ${item.name} (${item.color})\n`;
+        msg += `   └ ${item.price ? item.price.toLocaleString() + ' ₽' : 'Вкл'}\n`;
+    });
+
+    msg += `\n💰 <b>Итого:</b> ${orderData.total}\n`;
+    msg += `📏 <b>Габариты:</b> ${orderData.dims}\n`;
+    msg += `⚖️ ${orderData.weight.replace('Вес:', '<b>Вес:</b>')}`;
+    
     return msg;
 }
 
-// Отправка заказа (создает топик)
+function createClientMessage(orderData) {
+    let msg = `✅ <b>Ваша заявка принята!</b>\n\n`;
+    msg += `Менеджер свяжется с вами в ближайшее время.\n\n`;
+    
+    msg += `📋 <b>Ваш заказ:</b>\n`;
+    orderData.items.forEach((item, i) => {
+        msg += `${i + 1}. ${item.name} (${item.color})\n`;
+        msg += `   └ ${item.price ? item.price.toLocaleString() + ' ₽' : 'Вкл'}\n`;
+    });
+
+    msg += `\n💰 <b>Итого:</b> ${orderData.total}\n`;
+    msg += `📏 <b>Габариты:</b> ${orderData.dims}\n`;
+    msg += `⚖️ ${orderData.weight.replace('Вес:', '<b>Вес:</b>')}`;
+    
+    return msg;
+}
+
+// --- ОТПРАВКА ЗАКАЗОВ ---
+
 async function sendOrderToManager(orderData, userData) {
     const message = createManagerMessage(orderData, userData);
     if (ADMIN_GROUP_ID) {
+        // Создаем топик или получаем существующий
         const threadId = await getOrCreateTopic(userData);
         await bot.api.sendMessage(ADMIN_GROUP_ID, message, { 
             parse_mode: 'HTML',
@@ -76,50 +103,45 @@ async function sendConfirmationToClient(orderData, userData) {
 // === ЛОГИКА ЧАТА (САППОРТ) ===
 
 bot.on('message', async (ctx, next) => {
-    // Игнорируем служебные сообщения и WebApp данные (они обработаются своим handler'ом)
-    if (ctx.message.web_app_data || ctx.message.is_topic_message || ctx.message.is_automatic_forward) {
+    // Игнорируем только системные пересылки и данные заказа
+    // ВАЖНО: Убрали фильтр is_topic_message, чтобы админ мог писать!
+    if (ctx.message.web_app_data || ctx.message.is_automatic_forward) {
         return next();
     }
 
     const msg = ctx.message;
 
-    // СЦЕНАРИЙ 1: Клиент пишет боту в личку
+    // 1. КЛИЕНТ ПИШЕТ БОТУ (В личку)
     if (ctx.chat.type === 'private') {
-        console.log(`📩 Сообщение от клиента: ${ctx.from.first_name}`);
-        
         const threadId = await getOrCreateTopic(ctx.from);
         
         if (ADMIN_GROUP_ID && threadId) {
             try {
-                // Копируем сообщение в топик
+                // Копируем сообщение в топик клиента
                 await ctx.copyMessage(ADMIN_GROUP_ID, { message_thread_id: threadId });
             } catch (e) {
                 console.error("Ошибка пересылки в группу:", e);
             }
-        } else {
-            // Если топик создать не удалось (например, бот не админ), шлем просто в группу
-            await ctx.copyMessage(ADMIN_GROUP_ID); 
         }
     } 
     
-    // СЦЕНАРИЙ 2: Админ пишет в Топике (ID чата совпадает с ID группы)
+    // 2. АДМИН ПИШЕТ В ТОПИКЕ (ID чата совпадает с ID группы)
     else if (ctx.chat.id.toString() === ADMIN_GROUP_ID.toString()) {
-        console.log(`👨‍💻 Админ пишет в группе. Thread ID: ${msg.message_thread_id}`);
-
-        // Если это сообщение внутри топика (есть thread_id)
+        
+        // Проверяем, что это сообщение внутри топика (есть thread_id)
         if (msg.message_thread_id) {
-            // Ищем, какому юзеру принадлежит этот топик
+            // Ищем в базе: чей это топик?
             const userId = await redis.get(`thread:${msg.message_thread_id}`);
             
             if (userId) {
                 try {
-                    // Копируем ответ админа клиенту
+                    // Копируем сообщение клиенту
                     await ctx.copyMessage(userId);
                 } catch (e) {
                     console.error("Не удалось отправить клиенту (блок?):", e);
                 }
             } else {
-                console.log("⚠️ Не найден User ID для этого топика в базе.");
+                console.log("⚠️ ID пользователя для этого топика не найден в базе.");
             }
         }
     }
@@ -127,9 +149,7 @@ bot.on('message', async (ctx, next) => {
     return next();
 });
 
-// === ОБРАБОТКА ЗАКАЗОВ ===
-
-// 1. Стандартный sendData
+// === ОБРАБОТКА ЗАКАЗОВ (Стандартный путь) ===
 bot.on('message:web_app_data', async (ctx) => {
     try {
         const { data } = ctx.message.web_app_data;
@@ -137,18 +157,23 @@ bot.on('message:web_app_data', async (ctx) => {
         const user = ctx.from; 
 
         await sendOrderToManager(order, user);
-        await ctx.reply(createClientMessage(order), { parse_mode: 'HTML', reply_markup: { remove_keyboard: true } });
+        
+        // Ответ клиенту с удалением кнопки
+        await ctx.reply(createClientMessage(order), { 
+            parse_mode: 'HTML', 
+            reply_markup: { remove_keyboard: true } 
+        });
     } catch (e) { console.error(e); }
 });
 
-// 2. Команда /start
+// Команда /start
 bot.command('start', async (ctx) => {
     if (ctx.chat.type === 'private') {
         await ctx.reply('👋 Конструктор готов! Нажмите кнопку ниже.\n\n💬 Пишите сюда — менеджер ответит.', { reply_markup: KEYBOARD });
     }
 });
 
-// 3. Прямой fetch
+// Прямой fetch (для меню)
 const handleUpdate = webhookCallback(bot, 'http');
 
 module.exports = async (req, res) => {
