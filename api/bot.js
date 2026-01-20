@@ -10,7 +10,7 @@ const KEYBOARD = {
     resize_keyboard: true
 };
 
-// --- КОМАНДА СБРОСА (Для лечения багов) ---
+// --- КОМАНДА СБРОСА ---
 bot.command('reset', async (ctx) => {
     try {
         await kv.del(`user:${ctx.from.id}`);
@@ -44,7 +44,6 @@ async function createNewTopic(user) {
 async function getTopicForUser(user) {
     const cachedId = await kv.get(`user:${user.id}`);
     
-    // ВАЖНО: Проверяем, что ID - это валидное число
     if (cachedId && !isNaN(parseInt(cachedId)) && parseInt(cachedId) > 0) {
         return parseInt(cachedId);
     }
@@ -85,9 +84,7 @@ async function sendToGroupWithRetry(text, user) {
     } catch (e) {
         console.error(`[ERROR] Fail send to ${threadId}:`, e.message);
         
-        // Чистка и ретрай
         await kv.del(`user:${user.id}`);
-        // Не удаляем thread:ID, так как он мог быть кривым
         
         const newResult = await createNewTopic(user);
         
@@ -127,10 +124,26 @@ async function copyToGroupWithRetry(ctx) {
     }
 }
 
-// === ОБРАБОТЧИКИ ===
+// === НОВАЯ ФУНКЦИЯ: АВТОМАТИЧЕСКАЯ ОЧИСТКА ===
+// Этот обработчик ловит системное сообщение об удалении топика
+bot.on('message:forum_topic_deleted', async (ctx) => {
+    const threadId = ctx.message.message_thread_id;
+    const userId = await kv.get(`thread:${threadId}`);
+    
+    if (userId) {
+        await kv.del(`user:${userId}`);
+        await kv.del(`thread:${threadId}`);
+        console.log(`🗑 Топик ${threadId} удален. Пользователь ${userId} сброшен.`);
+        // Можно отправить уведомление в General, что база очищена
+        // await ctx.reply(`♻️ Данные топика #${threadId} очищены.`);
+    }
+});
+
+// === ОСНОВНОЙ ОБРАБОТЧИК (Твой рабочий) ===
 
 bot.on('message', async (ctx, next) => {
-    if (ctx.message.web_app_data || ctx.message.is_automatic_forward) return next();
+    // Пропускаем служебные (включая удаление топика, т.к. оно обработано выше)
+    if (ctx.message.web_app_data || ctx.message.is_automatic_forward || ctx.message.forum_topic_deleted) return next();
 
     const chatId = ctx.chat.id.toString();
     
@@ -150,6 +163,8 @@ bot.on('message', async (ctx, next) => {
     return next();
 });
 
+// === ОБРАБОТЧИК ЗАКАЗА ===
+
 bot.on('message:web_app_data', async (ctx) => {
     try {
         const { data } = ctx.message.web_app_data;
@@ -161,6 +176,14 @@ bot.on('message:web_app_data', async (ctx) => {
         await ctx.reply(createClientMessage(order), { parse_mode: 'HTML', reply_markup: { remove_keyboard: true } });
     } catch (e) { console.error(e); }
 });
+
+// === СТАРТ ===
+
+bot.command('start', async (ctx) => {
+    if (ctx.chat.type === 'private') await ctx.reply('👋 Конструктор готов! Нажмите кнопку ниже.', { reply_markup: KEYBOARD });
+});
+
+// === ЗАПУСК ===
 
 const handleUpdate = webhookCallback(bot, 'http');
 
@@ -183,7 +206,3 @@ module.exports = async (req, res) => {
     }
     try { return await handleUpdate(req, res); } catch (e) { return res.status(500).send('Error'); }
 };
-
-bot.command('start', async (ctx) => {
-    if (ctx.chat.type === 'private') await ctx.reply('👋 Конструктор готов! Нажмите кнопку ниже.', { reply_markup: KEYBOARD });
-});
