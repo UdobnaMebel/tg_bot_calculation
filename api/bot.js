@@ -10,17 +10,20 @@ const KEYBOARD = {
     resize_keyboard: true
 };
 
-// --- КОМАНДА СБРОСА ---
-bot.command('reset', async (ctx) => {
-    try {
-        await kv.del(`user:${ctx.from.id}`);
-        await ctx.reply("✅ Ваша сессия сброшена. Следующее сообщение создаст новый топик.");
-    } catch (e) {
-        await ctx.reply(`Ошибка сброса: ${e.message}`);
+// --- 1. КОМАНДЫ ---
+
+bot.command('start', async (ctx) => {
+    if (ctx.chat.type === 'private') {
+        await ctx.reply('👋 Конструктор готов! Нажмите кнопку ниже.\n\n💬 Пишите сюда — менеджер ответит.', { reply_markup: KEYBOARD });
     }
 });
 
-// --- ФУНКЦИИ ТОПИКОВ ---
+bot.command('reset', async (ctx) => {
+    await kv.del(`user:${ctx.from.id}`);
+    await ctx.reply('✅ Сессия сброшена.');
+});
+
+// --- 2. ФУНКЦИИ ЛОГИКИ ---
 
 async function createNewTopic(user) {
     try {
@@ -28,7 +31,6 @@ async function createNewTopic(user) {
         const nameClean = `${user.first_name} ${user.last_name||''}`.trim().substring(0, 30);
         const topicName = `${nameClean} #${randomId}`;
 
-        console.log(`[DEBUG] Создаем топик: ${topicName}`);
         const topic = await bot.api.createForumTopic(ADMIN_GROUP_ID, topicName);
         
         await kv.set(`user:${user.id}`, topic.message_thread_id);
@@ -36,23 +38,20 @@ async function createNewTopic(user) {
         
         return topic.message_thread_id;
     } catch (e) {
-        console.error("[ERROR] Create Topic:", e.message);
+        console.error("Create Topic Error:", e.message);
         return { error: e.message };
     }
 }
 
 async function getTopicForUser(user) {
     const cachedId = await kv.get(`user:${user.id}`);
-    
     if (cachedId && !isNaN(parseInt(cachedId)) && parseInt(cachedId) > 0) {
         return parseInt(cachedId);
     }
-    
-    console.log("[DEBUG] Валидный топик не найден, создаем новый...");
     return await createNewTopic(user);
 }
 
-// --- СООБЩЕНИЯ ---
+// --- 3. ФУНКЦИИ СООБЩЕНИЙ ---
 
 function createManagerMessage(order, user) {
     let msg = `🆕 <b>НОВЫЙ ЗАКАЗ</b>\n\n👤 <b>Клиент:</b> @${user.username||'нет'} (ID: ${user.id})\n\n📋 <b>Состав:</b>\n`;
@@ -68,7 +67,7 @@ function createClientMessage(order) {
     return msg;
 }
 
-// --- ОТПРАВКА С ЗАЩИТОЙ ---
+// --- 4. ФУНКЦИИ ОТПРАВКИ (С ЗАЩИТОЙ) ---
 
 async function sendToGroupWithRetry(text, user) {
     if (!ADMIN_GROUP_ID) return;
@@ -79,12 +78,11 @@ async function sendToGroupWithRetry(text, user) {
     }
 
     try {
-        console.log(`[DEBUG] Отправка в threadId: ${threadId}`);
         await bot.api.sendMessage(ADMIN_GROUP_ID, text, { parse_mode: 'HTML', message_thread_id: threadId });
     } catch (e) {
-        console.error(`[ERROR] Fail send to ${threadId}:`, e.message);
-        
+        // Ошибка отправки (топик удален?)
         await kv.del(`user:${user.id}`);
+        if (threadId) await kv.del(`thread:${threadId}`);
         
         const newResult = await createNewTopic(user);
         
@@ -102,56 +100,53 @@ async function copyToGroupWithRetry(ctx) {
 
     let threadId = await getTopicForUser(user);
     if (typeof threadId === 'object' && threadId.error) {
-        await bot.api.sendMessage(ADMIN_GROUP_ID, `⚠️ <b>Ошибка:</b> ${threadId.error}\nСообщение:`, { parse_mode: 'HTML' });
+        await bot.api.sendMessage(ADMIN_GROUP_ID, `⚠️ <b>Ошибка:</b> ${threadId.error}`, { parse_mode: 'HTML' });
         return await ctx.copyMessage(ADMIN_GROUP_ID);
     }
 
     try {
-        console.log(`[DEBUG] Пересылка в threadId: ${threadId}`);
         await ctx.copyMessage(ADMIN_GROUP_ID, { message_thread_id: threadId });
     } catch (e) {
-        console.error(`[ERROR] Fail copy to ${threadId}:`, e.message);
-        
+        // Ошибка пересылки (топик удален?)
         await kv.del(`user:${user.id}`);
         const newResult = await createNewTopic(user);
         
         if (typeof newResult === 'object' && newResult.error) {
-            await bot.api.sendMessage(ADMIN_GROUP_ID, `❌ <b>Сбой:</b> ${newResult.error}`, { parse_mode: 'HTML' });
-            await ctx.copyMessage(ADMIN_GROUP_ID);
+            await ctx.copyMessage(ADMIN_GROUP_ID); // Шлем в General
         } else {
             await ctx.copyMessage(ADMIN_GROUP_ID, { message_thread_id: newResult });
         }
     }
 }
 
-// === НОВАЯ ФУНКЦИЯ: АВТОМАТИЧЕСКАЯ ОЧИСТКА ===
-// Этот обработчик ловит системное сообщение об удалении топика
-bot.on('message:forum_topic_deleted', async (ctx) => {
-    const threadId = ctx.message.message_thread_id;
-    const userId = await kv.get(`thread:${threadId}`);
-    
-    if (userId) {
-        await kv.del(`user:${userId}`);
-        await kv.del(`thread:${threadId}`);
-        console.log(`🗑 Топик ${threadId} удален. Пользователь ${userId} сброшен.`);
-        // Можно отправить уведомление в General, что база очищена
-        // await ctx.reply(`♻️ Данные топика #${threadId} очищены.`);
-    }
+// ==========================================
+// 5. ОБРАБОТЧИКИ
+// ==========================================
+
+// А) Заказ (кнопка)
+bot.on('message:web_app_data', async (ctx) => {
+    try {
+        const { data } = ctx.message.web_app_data;
+        const order = JSON.parse(data);
+        const user = ctx.from; 
+        
+        await sendToGroupWithRetry(createManagerMessage(order, user), user);
+        await ctx.reply(createClientMessage(order), { parse_mode: 'HTML', reply_markup: { remove_keyboard: true } });
+    } catch (e) { console.error(e); }
 });
 
-// === ОСНОВНОЙ ОБРАБОТЧИК (Твой рабочий) ===
-
+// Б) Обычная переписка
 bot.on('message', async (ctx, next) => {
-    // Пропускаем служебные (включая удаление топика, т.к. оно обработано выше)
-    if (ctx.message.web_app_data || ctx.message.is_automatic_forward || ctx.message.forum_topic_deleted) return next();
+    // Игнорируем служебные
+    if (ctx.message.is_topic_message || ctx.message.is_automatic_forward) return next();
 
     const chatId = ctx.chat.id.toString();
     
-    // Клиент -> Бот
+    // Клиент пишет боту
     if (ctx.chat.type === 'private') {
         await copyToGroupWithRetry(ctx);
     } 
-    // Админ -> Клиент
+    // Админ отвечает в топике
     else if (chatId === ADMIN_GROUP_ID && ctx.message.message_thread_id) {
         const userId = await kv.get(`thread:${ctx.message.message_thread_id}`);
         if (userId) {
@@ -160,31 +155,9 @@ bot.on('message', async (ctx, next) => {
             } catch (e) { console.error("Ошибка ответа:", e); }
         }
     }
-    return next();
 });
 
-// === ОБРАБОТЧИК ЗАКАЗА ===
-
-bot.on('message:web_app_data', async (ctx) => {
-    try {
-        const { data } = ctx.message.web_app_data;
-        const order = JSON.parse(data);
-        const user = ctx.from; 
-        
-        await sendToGroupWithRetry(createManagerMessage(order, user), user);
-        
-        await ctx.reply(createClientMessage(order), { parse_mode: 'HTML', reply_markup: { remove_keyboard: true } });
-    } catch (e) { console.error(e); }
-});
-
-// === СТАРТ ===
-
-bot.command('start', async (ctx) => {
-    if (ctx.chat.type === 'private') await ctx.reply('👋 Конструктор готов! Нажмите кнопку ниже.', { reply_markup: KEYBOARD });
-});
-
-// === ЗАПУСК ===
-
+// Запуск Vercel
 const handleUpdate = webhookCallback(bot, 'http');
 
 module.exports = async (req, res) => {
@@ -204,5 +177,6 @@ module.exports = async (req, res) => {
         }
         return res.status(200).json({ success: true });
     }
+    
     try { return await handleUpdate(req, res); } catch (e) { return res.status(500).send('Error'); }
 };
