@@ -2,7 +2,8 @@ const { Bot, webhookCallback } = require('grammy');
 const Redis = require('ioredis');
 
 const bot = new Bot(process.env.BOT_TOKEN);
-const ADMIN_GROUP_ID = process.env.MANAGER_CHAT_ID; 
+// Чистим ID от пробелов и кавычек на всякий случай
+const ADMIN_GROUP_ID = (process.env.MANAGER_CHAT_ID || '').trim().replace(/['"]/g, ''); 
 const webAppUrl = process.env.WEBAPP_URL; 
 
 const redis = new Redis(process.env.REDIS_URL); 
@@ -13,7 +14,7 @@ const KEYBOARD = {
     resize_keyboard: true
 };
 
-// --- ФУНКЦИИ БАЗЫ И СООБЩЕНИЙ ---
+// --- ФУНКЦИИ ---
 
 async function getOrCreateTopic(user) {
     const userId = user.id;
@@ -22,14 +23,17 @@ async function getOrCreateTopic(user) {
 
     try {
         const topicName = `${user.first_name} ${user.last_name || ''} (@${user.username || 'anon'})`.trim().substring(0, 60);
+        console.log(`🛠 Создаю топик для ${userId}: ${topicName}`);
+        
         const topic = await bot.api.createForumTopic(ADMIN_GROUP_ID, topicName);
         
         await redis.set(`user:${userId}`, topic.message_thread_id);
         await redis.set(`thread:${topic.message_thread_id}`, userId);
-
+        
+        console.log(`✅ Топик создан: ${topic.message_thread_id}`);
         return topic.message_thread_id;
     } catch (e) {
-        console.error("Ошибка создания топика:", e);
+        console.error("🔴 Ошибка создания топика:", e.message);
         return null;
     }
 }
@@ -86,48 +90,52 @@ async function sendConfirmationToClient(orderData, userData) {
     } catch (e) { console.error(e); }
 }
 
-// === ГЛАВНЫЙ ОБРАБОТЧИК СООБЩЕНИЙ ===
+// === ЛОГИКА ЧАТА (САППОРТ) ===
 
 bot.on('message', async (ctx, next) => {
-    // Игнорируем служебные обновления
+    // Игнорируем служебные
     if (ctx.message.web_app_data || ctx.message.is_automatic_forward) return next();
 
-    const msg = ctx.message;
-    const chatId = ctx.chat.id.toString();
-    const adminGroupId = ADMIN_GROUP_ID.toString();
+    const currentChatId = ctx.chat.id.toString();
+    const threadId = ctx.message.message_thread_id;
 
-    // 1. КЛИЕНТ -> ПИШЕТ БОТУ В ЛИЧКУ
+    // --- ЛОГИРОВАНИЕ ДЛЯ ОТЛАДКИ ---
+    // Если сообщение из группы - пишем в лог
+    if (currentChatId === ADMIN_GROUP_ID) {
+        console.log(`📢 СООБЩЕНИЕ В ГРУППЕ! Thread: ${threadId}, Text: ${ctx.message.text}`);
+    }
+    // -------------------------------
+
+    // 1. КЛИЕНТ ПИШЕТ БОТУ (В ЛИЧКУ)
     if (ctx.chat.type === 'private') {
-        const threadId = await getOrCreateTopic(ctx.from);
-        if (ADMIN_GROUP_ID && threadId) {
+        const topicId = await getOrCreateTopic(ctx.from);
+        if (ADMIN_GROUP_ID && topicId) {
             try {
-                await ctx.copyMessage(ADMIN_GROUP_ID, { message_thread_id: threadId });
+                await ctx.copyMessage(ADMIN_GROUP_ID, { message_thread_id: topicId });
             } catch (e) { console.error("Ошибка пересылки админу:", e); }
         }
     } 
     
-    // 2. АДМИН -> ПИШЕТ В ГРУППЕ (Топике)
-    // Проверяем, что ID чата совпадает с ID группы админов
-    else if (chatId === adminGroupId) {
+    // 2. АДМИН ПИШЕТ В ГРУППЕ (В ТОПИКЕ)
+    else if (currentChatId === ADMIN_GROUP_ID) {
         
-        // ЛОГ ДЛЯ ОТЛАДКИ (Смотреть в Vercel Logs)
-        console.log(`💬 Сообщение в группе. ThreadID: ${msg.message_thread_id}`);
+        if (threadId) {
+            // Ищем пользователя в базе
+            const userId = await redis.get(`thread:${threadId}`);
+            console.log(`🔎 Ищу юзера для топика ${threadId}... Нашел: ${userId}`);
 
-        if (msg.message_thread_id) {
-            // Ищем владельца топика
-            const userId = await redis.get(`thread:${msg.message_thread_id}`);
-            
             if (userId) {
                 try {
-                    // Пересылаем копию клиенту
                     await ctx.copyMessage(userId);
-                    console.log(`✅ Переслано пользователю ${userId}`);
+                    console.log("✅ Успешно переслано клиенту");
                 } catch (e) {
-                    console.error(`❌ Ошибка отправки юзеру ${userId}:`, e.message);
+                    console.error(`❌ Ошибка отправки клиенту: ${e.message}`);
                 }
             } else {
-                console.log(`⚠️ Не найден UserID для топика ${msg.message_thread_id}. База пуста?`);
+                console.log("⚠️ Юзер не найден. Возможно, это старый топик?");
             }
+        } else {
+            console.log("ℹ️ Сообщение в General (без топика), игнорируем.");
         }
     }
     
