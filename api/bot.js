@@ -1,40 +1,24 @@
 const { Bot, webhookCallback } = require('grammy');
-const Redis = require('ioredis');
+const { kv } = require('@vercel/kv'); // Родная библиотека Vercel (HTTP)
 
 const bot = new Bot(process.env.BOT_TOKEN);
 const ADMIN_GROUP_ID = (process.env.MANAGER_CHAT_ID || '').trim().replace(/['"]/g, ''); 
 const webAppUrl = process.env.WEBAPP_URL; 
-
-// === ПОДКЛЮЧЕНИЕ К БАЗЕ С TLS ===
-const redis = new Redis(process.env.REDIS_URL, {
-    tls: { rejectUnauthorized: false },
-    maxRetriesPerRequest: 1
-}); 
-redis.on('error', (err) => console.error('🔴 Redis Error:', err));
-redis.on('connect', () => console.log('🟢 Redis Connected!'));
 
 const KEYBOARD = {
     keyboard: [[{ text: "✅ Открыть конструктор", web_app: { url: webAppUrl } }]],
     resize_keyboard: true
 };
 
-// --- КОМАНДА ПРОВЕРКИ БАЗЫ ---
+// --- КОМАНДА ТЕСТА БАЗЫ ---
 bot.command('dbtest', async (ctx) => {
     try {
-        await ctx.reply("⏳ Проверяю базу данных...");
-        
-        // Тест записи
-        await redis.set('test_key', 'Hello Redis!');
-        // Тест чтения
-        const value = await redis.get('test_key');
-        
-        if (value === 'Hello Redis!') {
-            await ctx.reply(`✅ <b>База работает!</b>\nОтвет базы: ${value}`, { parse_mode: 'HTML' });
-        } else {
-            await ctx.reply(`❌ <b>Ошибка данных:</b> Записали одно, получили "${value}"`, { parse_mode: 'HTML' });
-        }
+        await ctx.reply("⏳ Тест HTTP соединения...");
+        await kv.set('test_key', 'Work!');
+        const res = await kv.get('test_key');
+        await ctx.reply(`✅ База ответила: ${res}`);
     } catch (e) {
-        await ctx.reply(`❌ <b>Ошибка подключения:</b>\n${e.message}`, { parse_mode: 'HTML' });
+        await ctx.reply(`❌ Ошибка: ${e.message}`);
     }
 });
 
@@ -48,23 +32,20 @@ async function createNewTopic(user) {
 
         const topic = await bot.api.createForumTopic(ADMIN_GROUP_ID, topicName);
         
-        await redis.set(`user:${user.id}`, topic.message_thread_id);
-        await redis.set(`thread:${topic.message_thread_id}`, user.id);
+        // Синтаксис такой же, но работает через HTTP запрос
+        await kv.set(`user:${user.id}`, topic.message_thread_id);
+        await kv.set(`thread:${topic.message_thread_id}`, user.id);
         
         return topic.message_thread_id;
     } catch (e) {
-        console.error("Error creating topic:", e);
         return { error: e.message };
     }
 }
 
 async function getTopicForUser(user) {
-    try {
-        const cachedId = await redis.get(`user:${user.id}`);
-        if (cachedId) return parseInt(cachedId);
-    } catch (e) {
-        console.error("Redis read error:", e);
-    }
+    // Получаем данные (это обычный fetch внутри, поэтому он не виснет)
+    const cachedId = await kv.get(`user:${user.id}`);
+    if (cachedId) return parseInt(cachedId);
     return await createNewTopic(user);
 }
 
@@ -72,13 +53,13 @@ async function getTopicForUser(user) {
 
 function createManagerMessage(order, user) {
     let msg = `🆕 <b>НОВЫЙ ЗАКАЗ</b>\n\n👤 <b>Клиент:</b> @${user.username||'нет'} (ID: ${user.id})\n\n📋 <b>Состав:</b>\n`;
-    order.items.forEach(i => msg += `${i.name} (${i.color})\n   └ ${i.price ? i.price.toLocaleString() + ' ₽' : 'Вкл'}\n`);
+    order.items.forEach(i => msg += `${i.name} (${i.color}) - ${i.price}\n`);
     msg += `\n💰 <b>Итого:</b> ${order.total}\n📏 ${order.dims}\n⚖️ ${order.weight.replace('Вес:', '<b>Вес:</b>')}`;
     return msg;
 }
 
 function createClientMessage(order) {
-    let msg = `✅ <b>Ваша заявка принята!</b>\nМенеджер скоро свяжется с вами.\n\n📋 <b>Заказ:</b>\n`;
+    let msg = `✅ <b>Заявка принята!</b>\nМенеджер скоро свяжется с вами.\n\n📋 <b>Заказ:</b>\n`;
     order.items.forEach(i => msg += `${i.name} (${i.color})\n`);
     msg += `\n💰 <b>Итого:</b> ${order.total}`;
     return msg;
@@ -93,23 +74,22 @@ async function sendToGroupWithRetry(text, user) {
     let threadId = (typeof result === 'object' && result?.error) ? null : result;
     
     if (typeof result === 'object' && result?.error) {
-        // Если ошибка создания - пишем в General
         return await bot.api.sendMessage(ADMIN_GROUP_ID, `⚠️ <b>Ошибка тикета:</b> ${result.error}\n\n${text}`, { parse_mode: 'HTML' });
     }
 
     try {
         await bot.api.sendMessage(ADMIN_GROUP_ID, text, { parse_mode: 'HTML', message_thread_id: threadId });
     } catch (e) {
-        // Топик удален?
-        await redis.del(`user:${user.id}`);
-        if (threadId) await redis.del(`thread:${threadId}`);
+        // Очистка при ошибке
+        await kv.del(`user:${user.id}`);
+        if (threadId) await kv.del(`thread:${threadId}`);
         
-        result = await createNewTopic(user);
-        threadId = (typeof result === 'object' && result?.error) ? null : result;
+        const newResult = await createNewTopic(user);
+        const newThreadId = (typeof newResult === 'object' && newResult.error) ? null : newResult;
         
         await bot.api.sendMessage(ADMIN_GROUP_ID, text, { 
             parse_mode: 'HTML', 
-            message_thread_id: threadId || undefined 
+            message_thread_id: newThreadId || undefined 
         });
     }
 }
@@ -128,13 +108,16 @@ async function copyToGroupWithRetry(ctx) {
     try {
         await ctx.copyMessage(ADMIN_GROUP_ID, { message_thread_id: threadId });
     } catch (e) {
-        await redis.del(`user:${user.id}`);
-        const newTopic = await createNewTopic(user);
+        await kv.del(`user:${user.id}`);
+        if (threadId) await kv.del(`thread:${threadId}`);
         
-        if (typeof newTopic === 'object' && newTopic.error) {
-            await ctx.copyMessage(ADMIN_GROUP_ID);
+        const newResult = await createNewTopic(user);
+        const newThreadId = (typeof newResult === 'object' && newResult.error) ? null : newResult;
+        
+        if (newThreadId) {
+            await ctx.copyMessage(ADMIN_GROUP_ID, { message_thread_id: newThreadId });
         } else {
-            await ctx.copyMessage(ADMIN_GROUP_ID, { message_thread_id: newTopic });
+            await ctx.copyMessage(ADMIN_GROUP_ID);
         }
     }
 }
@@ -150,11 +133,11 @@ bot.on('message', async (ctx, next) => {
         await copyToGroupWithRetry(ctx);
     } 
     else if (chatId === ADMIN_GROUP_ID && ctx.message.message_thread_id) {
-        const userId = await redis.get(`thread:${ctx.message.message_thread_id}`);
+        const userId = await kv.get(`thread:${ctx.message.message_thread_id}`);
         if (userId) {
             try {
                 await ctx.copyMessage(userId);
-            } catch (e) {}
+            } catch (e) { console.error("Ошибка ответа:", e); }
         }
     }
     return next();
