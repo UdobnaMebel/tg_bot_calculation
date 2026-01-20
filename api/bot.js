@@ -2,166 +2,156 @@ const { Bot, webhookCallback } = require('grammy');
 const Redis = require('ioredis');
 
 const bot = new Bot(process.env.BOT_TOKEN);
+// Очистка ID группы
 const ADMIN_GROUP_ID = (process.env.MANAGER_CHAT_ID || '').trim().replace(/['"]/g, ''); 
 const webAppUrl = process.env.WEBAPP_URL; 
 
 const redis = new Redis(process.env.REDIS_URL); 
-redis.on('error', (err) => console.error('Redis Client Error', err));
+redis.on('error', (err) => console.error('🔴 REDIS ERROR:', err));
 
 const KEYBOARD = {
     keyboard: [[{ text: "✅ Открыть конструктор", web_app: { url: webAppUrl } }]],
     resize_keyboard: true
 };
 
-// --- ФУНКЦИИ ---
+// --- ФУНКЦИИ ТОПИКОВ (С ЛОГАМИ) ---
 
-// Создать новый топик
 async function createNewTopic(user) {
     try {
+        console.log(`[DEBUG] Пытаюсь создать топик для пользователя ${user.id}...`);
+        
         const dateStr = new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
         const nameClean = `${user.first_name} ${user.last_name||''}`.trim().substring(0, 30);
-        // Добавляем время, чтобы имя было уникальным (избегаем ошибок Telegram)
-        const topicName = `${nameClean} [${dateStr}]`;
+        // Добавляем случайное число для уникальности, если время совпадает
+        const randomId = Math.floor(Math.random() * 100);
+        const topicName = `${nameClean} [${dateStr}-${randomId}]`;
 
         const topic = await bot.api.createForumTopic(ADMIN_GROUP_ID, topicName);
         
+        console.log(`[DEBUG] ✅ Топик создан! ID: ${topic.message_thread_id}, Name: ${topicName}`);
+
         await redis.set(`user:${user.id}`, topic.message_thread_id);
         await redis.set(`thread:${topic.message_thread_id}`, user.id);
         
         return topic.message_thread_id;
     } catch (e) {
-        // Если ошибка - возвращаем объект с текстом ошибки
+        // ВОТ ЗДЕСЬ ТЕПЕРЬ БУДЕТ ЛОГ ОШИБКИ В VERCEL
+        console.error(`[ERROR] ❌ Ошибка создания топика: ${e.message}`, e);
         return { error: e.message };
     }
 }
 
-// Получить ID топика
 async function getTopicForUser(user) {
     const cachedId = await redis.get(`user:${user.id}`);
-    if (cachedId) return parseInt(cachedId);
+    if (cachedId) {
+        // console.log(`[DEBUG] Топик найден в кэше: ${cachedId}`);
+        return parseInt(cachedId);
+    }
     return await createNewTopic(user);
-}
-
-// --- ОТПРАВКА С ИСПРАВЛЕННОЙ ЛОГИКОЙ ---
-
-async function sendToGroupWithRetry(text, user) {
-    if (!ADMIN_GROUP_ID) return;
-
-    // 1. Получаем ID (из базы или создаем новый)
-    let threadResult = await getTopicForUser(user);
-    
-    // Если threadResult - это объект с ошибкой (не удалось создать)
-    if (typeof threadResult === 'object' && threadResult.error) {
-        // Шлем в General с ошибкой
-        return await bot.api.sendMessage(ADMIN_GROUP_ID, 
-            `⚠️ <b>Не удалось создать топик:</b> ${threadResult.error}\n\n${text}`, 
-            { parse_mode: 'HTML' }
-        );
-    }
-
-    let threadId = threadResult;
-
-    try {
-        // 2. Пробуем отправить в полученный ID
-        await bot.api.sendMessage(ADMIN_GROUP_ID, text, { 
-            parse_mode: 'HTML', 
-            message_thread_id: threadId 
-        });
-    } catch (e) {
-        // 3. ОШИБКА ОТПРАВКИ (Например, топик удален)
-        // Пишем диагностику в General, чтобы ты видел
-        await bot.api.sendMessage(ADMIN_GROUP_ID, `♻️ Топик #${threadId} не найден. Пересоздаю для ${user.first_name}...`);
-
-        // Чистим старую запись
-        await redis.del(`user:${user.id}`);
-        if (threadId) await redis.del(`thread:${threadId}`);
-
-        // Создаем новый топик
-        const newTopicResult = await createNewTopic(user);
-
-        if (typeof newTopicResult === 'object' && newTopicResult.error) {
-             await bot.api.sendMessage(ADMIN_GROUP_ID, `❌ Ошибка пересоздания: ${newTopicResult.error}\n\n${text}`, { parse_mode: 'HTML' });
-        } else {
-             // Отправляем в новый топик
-             await bot.api.sendMessage(ADMIN_GROUP_ID, text, { 
-                parse_mode: 'HTML', 
-                message_thread_id: newTopicResult 
-            });
-        }
-    }
-}
-
-// Копирование (для чата) - та же логика
-async function copyToGroupWithRetry(ctx) {
-    if (!ADMIN_GROUP_ID) return;
-    const user = ctx.from;
-
-    let threadResult = await getTopicForUser(user);
-    
-    // Если ошибка создания
-    if (typeof threadResult === 'object' && threadResult.error) {
-        await ctx.reply(`Ошибка чата: ${threadResult.error}`);
-        return await ctx.copyMessage(ADMIN_GROUP_ID); // В General
-    }
-
-    let threadId = threadResult;
-
-    try {
-        await ctx.copyMessage(ADMIN_GROUP_ID, { message_thread_id: threadId });
-    } catch (e) {
-        // Если ошибка копирования
-        await redis.del(`user:${user.id}`);
-        const newTopic = await createNewTopic(user);
-        
-        if (typeof newTopic === 'object' && newTopic.error) {
-            await ctx.copyMessage(ADMIN_GROUP_ID); // В General
-        } else {
-            await ctx.copyMessage(ADMIN_GROUP_ID, { message_thread_id: newTopic });
-        }
-    }
 }
 
 // --- СООБЩЕНИЯ ---
 
 function createManagerMessage(order, user) {
     let msg = `🆕 <b>НОВЫЙ ЗАКАЗ</b>\n\n👤 <b>Клиент:</b> @${user.username||'нет'} (ID: ${user.id})\n\n📋 <b>Состав:</b>\n`;
-    order.items.forEach(i => msg += `${i.name} (${i.color})\n   └ ${i.price ? i.price.toLocaleString() + ' ₽' : 'Вкл'}\n`);
+    order.items.forEach(i => msg += `${i.name} (${i.color}) - ${i.price}\n`);
     msg += `\n💰 <b>Итого:</b> ${order.total}\n📏 ${order.dims}\n⚖️ ${order.weight.replace('Вес:', '<b>Вес:</b>')}`;
     return msg;
 }
 
 function createClientMessage(order) {
-    let msg = `✅ <b>Ваша заявка принята!</b>\nМенеджер скоро свяжется с вами.\n\n📋 <b>Заказ:</b>\n`;
+    let msg = `✅ <b>Заявка принята!</b>\nМенеджер скоро свяжется с вами.\n\n📋 <b>Заказ:</b>\n`;
     order.items.forEach(i => msg += `${i.name} (${i.color})\n`);
     msg += `\n💰 <b>Итого:</b> ${order.total}`;
     return msg;
 }
 
+// --- ОТПРАВКА ---
+
+async function sendToGroupWithRetry(text, user) {
+    if (!ADMIN_GROUP_ID) return;
+    
+    let threadId = await getTopicForUser(user);
+    if (typeof threadId === 'object' && threadId.error) {
+        return await bot.api.sendMessage(ADMIN_GROUP_ID, `⚠️ <b>Ошибка (Create):</b> ${threadId.error}\n\n${text}`, { parse_mode: 'HTML' });
+    }
+
+    try {
+        await bot.api.sendMessage(ADMIN_GROUP_ID, text, { parse_mode: 'HTML', message_thread_id: threadId });
+    } catch (e) {
+        console.error(`[ERROR] Ошибка отправки в топик ${threadId}:`, e.message);
+        
+        await bot.api.sendMessage(ADMIN_GROUP_ID, `♻️ Топик #${threadId} недоступен. Пересоздаю...`);
+        await redis.del(`user:${user.id}`);
+        if (threadId) await redis.del(`thread:${threadId}`);
+        
+        const newResult = await createNewTopic(user);
+        if (typeof newResult === 'object' && newResult.error) {
+             await bot.api.sendMessage(ADMIN_GROUP_ID, `❌ Ошибка восстановления: ${newResult.error}\n\n${text}`, { parse_mode: 'HTML' });
+        } else {
+             await bot.api.sendMessage(ADMIN_GROUP_ID, text, { parse_mode: 'HTML', message_thread_id: newResult });
+        }
+    }
+}
+
+async function copyToGroupWithRetry(ctx) {
+    if (!ADMIN_GROUP_ID) return;
+    const user = ctx.from;
+
+    let threadId = await getTopicForUser(user);
+    
+    // Если не удалось создать топик сразу
+    if (typeof threadId === 'object' && threadId.error) {
+        await bot.api.sendMessage(ADMIN_GROUP_ID, `⚠️ <b>Ошибка тикета:</b> ${threadId.error}\nСообщение от ${user.first_name}:`, { parse_mode: 'HTML' });
+        return await ctx.copyMessage(ADMIN_GROUP_ID); // Шлем в General
+    }
+
+    try {
+        await ctx.copyMessage(ADMIN_GROUP_ID, { message_thread_id: threadId });
+    } catch (e) {
+        console.error(`[ERROR] Ошибка пересылки в топик ${threadId}:`, e.message);
+        
+        // Удаляем старые данные
+        await redis.del(`user:${user.id}`);
+        if (threadId) await redis.del(`thread:${threadId}`);
+        
+        // Пробуем создать новый
+        const newResult = await createNewTopic(user);
+        
+        if (typeof newResult === 'object' && newResult.error) {
+            // Если и новый создать не вышло - шлем в General с отчетом
+            await bot.api.sendMessage(ADMIN_GROUP_ID, `❌ <b>Сбой чата:</b> ${newResult.error}\nСообщение от ${user.first_name}:`, { parse_mode: 'HTML' });
+            await ctx.copyMessage(ADMIN_GROUP_ID);
+        } else {
+            // Шлем в новый топик
+            await ctx.copyMessage(ADMIN_GROUP_ID, { message_thread_id: newResult });
+        }
+    }
+}
+
 // === ОБРАБОТЧИКИ ===
 
-// 1. ЧАТ (Сообщения)
 bot.on('message', async (ctx, next) => {
     if (ctx.message.web_app_data || ctx.message.is_automatic_forward) return next();
 
     const chatId = ctx.chat.id.toString();
     
-    // Клиент -> Админ
+    // 1. Клиент -> Бот
     if (ctx.chat.type === 'private') {
         await copyToGroupWithRetry(ctx);
     } 
-    // Админ -> Клиент
+    // 2. Админ -> Клиент
     else if (chatId === ADMIN_GROUP_ID && ctx.message.message_thread_id) {
         const userId = await redis.get(`thread:${ctx.message.message_thread_id}`);
         if (userId) {
             try {
                 await ctx.copyMessage(userId);
-            } catch (e) { console.error("Ошибка ответа:", e); }
+            } catch (e) { console.error(`[ERROR] Не ушло клиенту ${userId}:`, e.message); }
         }
     }
     return next();
 });
 
-// 2. ЗАКАЗ (WebApp Data)
 bot.on('message:web_app_data', async (ctx) => {
     try {
         const { data } = ctx.message.web_app_data;
@@ -169,19 +159,19 @@ bot.on('message:web_app_data', async (ctx) => {
         const user = ctx.from; 
         
         await sendToGroupWithRetry(createManagerMessage(order, user), user);
-        
         await ctx.reply(createClientMessage(order), { parse_mode: 'HTML', reply_markup: { remove_keyboard: true } });
-    } catch (e) { console.error(e); }
+    } catch (e) { console.error("[ERROR] WebApp Data:", e); }
 });
 
 const handleUpdate = webhookCallback(bot, 'http');
 
-// 3. ПРЯМОЙ ЗАКАЗ (Fetch)
 module.exports = async (req, res) => {
     if (req.method === 'GET') return res.status(200).send('Bot Running');
     
     if (req.body?.type === 'DIRECT_ORDER') {
         const { order, user } = req.body;
+        console.log(`[DEBUG] Прямой заказ от ${user.first_name}`);
+        
         await sendToGroupWithRetry(createManagerMessage(order, user), user);
         
         if (user.id) {
@@ -190,11 +180,15 @@ module.exports = async (req, res) => {
                     parse_mode: 'HTML', 
                     reply_markup: { remove_keyboard: true } 
                 });
-            } catch (e) {}
+            } catch (e) { console.error("[ERROR] Client reply:", e.message); }
         }
         return res.status(200).json({ success: true });
     }
-    try { return await handleUpdate(req, res); } catch (e) { return res.status(500).send('Error'); }
+    
+    try { return await handleUpdate(req, res); } catch (e) { 
+        console.error("[CRITICAL]", e);
+        return res.status(500).send('Error'); 
+    }
 };
 
 bot.command('start', async (ctx) => {
