@@ -2,10 +2,11 @@ const { Bot, webhookCallback } = require('grammy');
 const Redis = require('ioredis');
 
 const bot = new Bot(process.env.BOT_TOKEN);
-// Чистим ID от пробелов и кавычек на всякий случай
+// Чистим ID от лишних пробелов и кавычек
 const ADMIN_GROUP_ID = (process.env.MANAGER_CHAT_ID || '').trim().replace(/['"]/g, ''); 
 const webAppUrl = process.env.WEBAPP_URL; 
 
+// Подключаемся к Redis
 const redis = new Redis(process.env.REDIS_URL); 
 redis.on('error', (err) => console.error('Redis Client Error', err));
 
@@ -14,23 +15,20 @@ const KEYBOARD = {
     resize_keyboard: true
 };
 
-// --- ФУНКЦИИ ---
+// --- ФУНКЦИИ БАЗЫ ДАННЫХ ---
 
-async function getOrCreateTopic(user) {
-    const userId = user.id;
-    const existingThreadId = await redis.get(`user:${userId}`);
-    if (existingThreadId) return parseInt(existingThreadId);
-
+// Функция создания НОВОГО топика (выделена отдельно)
+async function createNewTopic(user) {
     try {
         const topicName = `${user.first_name} ${user.last_name || ''} (@${user.username || 'anon'})`.trim().substring(0, 60);
-        console.log(`🛠 Создаю топик для ${userId}: ${topicName}`);
+        console.log(`🔨 Создаю новый топик для ${user.id}...`);
         
         const topic = await bot.api.createForumTopic(ADMIN_GROUP_ID, topicName);
         
-        await redis.set(`user:${userId}`, topic.message_thread_id);
-        await redis.set(`thread:${topic.message_thread_id}`, userId);
+        // Сохраняем в базу
+        await redis.set(`user:${user.id}`, topic.message_thread_id);
+        await redis.set(`thread:${topic.message_thread_id}`, user.id);
         
-        console.log(`✅ Топик создан: ${topic.message_thread_id}`);
         return topic.message_thread_id;
     } catch (e) {
         console.error("🔴 Ошибка создания топика:", e.message);
@@ -38,45 +36,59 @@ async function getOrCreateTopic(user) {
     }
 }
 
+// Получить ID топика (или создать, если нет)
+async function getTopicForUser(user) {
+    const existingThreadId = await redis.get(`user:${user.id}`);
+    if (existingThreadId) return parseInt(existingThreadId);
+    return await createNewTopic(user);
+}
+
+// --- СООБЩЕНИЯ ---
+
 function createManagerMessage(orderData, user) {
     let msg = `🆕 <b>НОВЫЙ ЗАКАЗ</b>\n\n`;
     const username = user.username ? `@${user.username}` : 'Без ника';
     msg += `👤 <b>Клиент:</b> ${username} (ID: ${user.id})\n\n`;
     msg += `📋 <b>Состав заказа:</b>\n`;
-    orderData.items.forEach((item, i) => {
-        msg += `${i + 1}. ${item.name} (${item.color})\n`;
-        msg += `   └ ${item.price ? item.price.toLocaleString() + ' ₽' : 'Вкл'}\n`;
-    });
-    msg += `\n💰 <b>Итого:</b> ${orderData.total}\n`;
-    msg += `📏 <b>Габариты:</b> ${orderData.dims}\n`;
-    msg += `⚖️ ${orderData.weight.replace('Вес:', '<b>Вес:</b>')}`;
+    orderData.items.forEach(i => msg += `${i.name} (${i.color})\n   └ ${i.price ? i.price.toLocaleString() + ' ₽' : 'Вкл'}\n`);
+    msg += `\n💰 <b>Итого:</b> ${orderData.total}\n📏 <b>Габариты:</b> ${orderData.dims}\n⚖️ ${orderData.weight.replace('Вес:', '<b>Вес:</b>')}`;
     return msg;
 }
 
 function createClientMessage(orderData) {
-    let msg = `✅ <b>Ваша заявка принята!</b>\n\n`;
-    msg += `Менеджер свяжется с вами в ближайшее время.\n\n`;
-    msg += `📋 <b>Ваш заказ:</b>\n`;
-    orderData.items.forEach((item, i) => {
-        msg += `${i + 1}. ${item.name} (${item.color})\n`;
-        msg += `   └ ${item.price ? item.price.toLocaleString() + ' ₽' : 'Вкл'}\n`;
-    });
-    msg += `\n💰 <b>Итого:</b> ${orderData.total}\n`;
-    msg += `📏 <b>Габариты:</b> ${orderData.dims}\n`;
-    msg += `⚖️ ${orderData.weight.replace('Вес:', '<b>Вес:</b>')}`;
+    let msg = `✅ <b>Ваша заявка принята!</b>\n\nМенеджер свяжется с вами в ближайшее время.\n\n📋 <b>Ваш заказ:</b>\n`;
+    orderData.items.forEach(i => msg += `${i.name} (${i.color})\n   └ ${i.price ? i.price.toLocaleString() + ' ₽' : 'Вкл'}\n`);
+    msg += `\n💰 <b>Итого:</b> ${orderData.total}\n📏 <b>Габариты:</b> ${orderData.dims}\n⚖️ ${orderData.weight.replace('Вес:', '<b>Вес:</b>')}`;
     return msg;
 }
 
-// --- ОТПРАВКА ---
+// --- ОТПРАВКА (САМОИСЦЕЛЯЮЩАЯСЯ) ---
 
 async function sendOrderToManager(orderData, userData) {
     const message = createManagerMessage(orderData, userData);
+    
     if (ADMIN_GROUP_ID) {
-        const threadId = await getOrCreateTopic(userData);
-        await bot.api.sendMessage(ADMIN_GROUP_ID, message, { 
-            parse_mode: 'HTML',
-            message_thread_id: threadId || undefined 
-        });
+        let threadId = await getTopicForUser(userData);
+        
+        try {
+            await bot.api.sendMessage(ADMIN_GROUP_ID, message, { 
+                parse_mode: 'HTML',
+                message_thread_id: threadId || undefined 
+            });
+        } catch (e) {
+            console.log("⚠️ Ошибка отправки в топик (удален?). Создаем новый...");
+            // Если ошибка - удаляем старую запись и создаем новый топик
+            await redis.del(`user:${userData.id}`);
+            threadId = await createNewTopic(userData);
+            
+            // Пробуем снова в новый топик
+            if (threadId) {
+                await bot.api.sendMessage(ADMIN_GROUP_ID, message, { 
+                    parse_mode: 'HTML',
+                    message_thread_id: threadId 
+                });
+            }
+        }
     }
 }
 
@@ -90,59 +102,59 @@ async function sendConfirmationToClient(orderData, userData) {
     } catch (e) { console.error(e); }
 }
 
-// === ЛОГИКА ЧАТА (САППОРТ) ===
+// === ГЛАВНЫЙ ОБРАБОТЧИК ===
 
 bot.on('message', async (ctx, next) => {
-    // Игнорируем служебные
     if (ctx.message.web_app_data || ctx.message.is_automatic_forward) return next();
 
-    const currentChatId = ctx.chat.id.toString();
-    const threadId = ctx.message.message_thread_id;
+    const msg = ctx.message;
+    const chatId = ctx.chat.id.toString(); // ID чата, откуда пришло
+    const adminIdString = ADMIN_GROUP_ID.toString(); // ID группы админов
 
-    // --- ЛОГИРОВАНИЕ ДЛЯ ОТЛАДКИ ---
-    // Если сообщение из группы - пишем в лог
-    if (currentChatId === ADMIN_GROUP_ID) {
-        console.log(`📢 СООБЩЕНИЕ В ГРУППЕ! Thread: ${threadId}, Text: ${ctx.message.text}`);
-    }
-    // -------------------------------
-
-    // 1. КЛИЕНТ ПИШЕТ БОТУ (В ЛИЧКУ)
+    // 1. КЛИЕНТ ПИШЕТ БОТУ
     if (ctx.chat.type === 'private') {
-        const topicId = await getOrCreateTopic(ctx.from);
-        if (ADMIN_GROUP_ID && topicId) {
+        let threadId = await getTopicForUser(ctx.from);
+        
+        if (ADMIN_GROUP_ID) {
             try {
-                await ctx.copyMessage(ADMIN_GROUP_ID, { message_thread_id: topicId });
-            } catch (e) { console.error("Ошибка пересылки админу:", e); }
+                // Пытаемся переслать в топик
+                await ctx.copyMessage(ADMIN_GROUP_ID, { message_thread_id: threadId });
+            } catch (e) {
+                console.log("⚠️ Топик не найден при пересылке. Создаем новый...");
+                // Если не вышло (топик удален) - чистим базу и создаем новый
+                await redis.del(`user:${ctx.from.id}`);
+                threadId = await createNewTopic(ctx.from);
+                if (threadId) {
+                    await ctx.copyMessage(ADMIN_GROUP_ID, { message_thread_id: threadId });
+                }
+            }
         }
     } 
     
-    // 2. АДМИН ПИШЕТ В ГРУППЕ (В ТОПИКЕ)
-    else if (currentChatId === ADMIN_GROUP_ID) {
-        
-        if (threadId) {
-            // Ищем пользователя в базе
-            const userId = await redis.get(`thread:${threadId}`);
-            console.log(`🔎 Ищу юзера для топика ${threadId}... Нашел: ${userId}`);
+    // 2. АДМИН ПИШЕТ В ГРУППЕ
+    else if (chatId === adminIdString) {
+        // Лог для отладки
+        console.log(`📢 Сообщение в группе. ThreadID: ${msg.message_thread_id}`);
 
+        if (msg.message_thread_id) {
+            const userId = await redis.get(`thread:${msg.message_thread_id}`);
+            console.log(`🔎 UserID для этого топика: ${userId}`);
+            
             if (userId) {
                 try {
                     await ctx.copyMessage(userId);
-                    console.log("✅ Успешно переслано клиенту");
+                    console.log("✅ Ответ отправлен клиенту");
                 } catch (e) {
-                    console.error(`❌ Ошибка отправки клиенту: ${e.message}`);
+                    console.error("❌ Клиент заблокировал бота или ошибка:", e.message);
                 }
-            } else {
-                console.log("⚠️ Юзер не найден. Возможно, это старый топик?");
             }
-        } else {
-            console.log("ℹ️ Сообщение в General (без топика), игнорируем.");
         }
     }
     
     return next();
 });
 
-// === ОБРАБОТКА ЗАКАЗОВ ===
+// === ОБРАБОТЧИКИ ЗАКАЗОВ ===
 
 bot.on('message:web_app_data', async (ctx) => {
     try {
